@@ -1,0 +1,438 @@
+---
+title: "GRN-midbrain"
+output: html_notebook
+---
+
+
+```{r load DA peaks}
+dir = '~/Desktop/Sara/Dev'
+setwd(dir)
+
+sourcefile <- file.path(dir, 'DA/dars_df.rds')
+rds <- readRDS(sourcefile)
+DA_human <-  as.data.frame(rds$human)
+#remove peaks that don't have a correpsonding peak in human
+DA_human <- filter(DA_human, grepl("Hu",orig_name))
+modified_list <- unlist(lapply(DA_human$orig_name, function(x) strsplit(x, ";")[[1]]))
+DA_human$orig_name <- modified_list[!grepl("Ch", modified_list)]
+rownames(DA_human) <- DA_human$orig_name
+#remove peaks that are human specific down
+DA_human <- filter(DA_human, logFC > 0)
+
+
+sourcefile <- file.path(dir, 'DA/peaks.rds')
+rds <- readRDS(sourcefile)
+ref <-  as.data.frame(rds$human)
+rownames(ref) <- ref$name
+ref$scenicplus_name <- paste0(ref$seqnames,':', ref$start,'-',ref$end)
+DA_human <- filter(ref, name %in% DA_human$orig_name)
+
+```
+
+
+
+```{r load GRNs/DEGs-dev}
+library(dplyr)
+
+dir = '~/Desktop/Sara/dev'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+hmodules <- read.csv(sourcefile,sep=',')
+#region to gene info
+sourcefile <- file.path(dir, 'R2G_adj_all.csv')
+hr2g <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+hGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(hGRNs) <- hGRNs$TF
+
+dir = '~/Desktop/Sara/dev/chimp'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+cmodules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+cGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(cGRNs) <- cGRNs$TF
+#number of regions
+sourcefile <- file.path(dir, 'GRN_signatures_region.csv')
+GRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(GRNs) <- GRNs$TF
+GRNs <- GRNs[rownames(cGRNs), ]
+cGRNs$regions <- GRNs$regions
+
+#human/chimp specific genes in DA lineage
+dir = '~/Desktop/Sara/DE'
+#hDEGs <- c()
+#for (x in list.files(dir)) {
+#  name = gsub('.csv','',x)
+#  if (file.size(file.path(dir,x)) == 0) next
+#  hDEGs <- union(hDEGs, filter(read.csv(file.path(dir,x),header = TRUE), specificity == "human_specific" & sign_hvc > 0)$ID)
+#}
+#use DEGs only from DA neurons
+hDEGs <- filter(read.csv(file.path(dir,'DA_neurons_polarize_summary.csv'),header = TRUE), specificity == "human_specific" & sign_hvc > 0)$ID
+print(length(hDEGs))
+#use DEGs only from DA neurons
+hDEGs <- filter(read.csv(file.path(dir,'DA_STN_neurons_immature_polarize_summary.csv'),header = TRUE), specificity == "human_specific" & sign_hvc > 0)$ID
+print(length(hDEGs))
+
+cDEGs <- c()
+#for (x in list.files(dir)) {
+#  name = gsub('.csv','',x)
+#  if (file.size(file.path(dir,x)) == 0) next
+#  cDEGs <- union(cDEGs, filter(read.csv(file.path(dir,x),header = TRUE), specificity == "chimp_specific" & sign_hvc < 0)$ID)
+#}
+#print(length(cDEGs))
+cDEGs <- filter(read.csv(file.path(dir,'DA_STN_neurons_immature_polarize_summary.csv'),header = TRUE), specificity == "chimp_specific" & sign_hvc < 0)$ID
+print(length(cDEGs))
+
+dir = '~/Desktop/Sara/dev/GRNs_gene'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(hgrn))
+
+dir = '~/Desktop/Sara/dev/GRNs_region'
+genes = rownames(hGRNs)
+hgrn_region <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn_region[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(hgrn_region))
+
+dir = '~/Desktop/Sara/dev/chimp/GRNs_gene'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(cgrn))
+```
+
+
+```{r}
+tfs<- c('LMX1A','PBX1','OTX2','ZFHX3','FOXP1')
+tfs<- c('LMX1A','PBX1','OTX2','ZFHX3','FOXP1','POU2F2','PBX3')
+#tfs<- c('LMX1A','PBX1','OTX2')
+#tfs<- c('ZFHX3','FOXP1','POU2F2','PBX3')
+#tfs<- c('ZFHX3','POU2F2')
+#tfs<- c('NFE2L1')
+tfs<- c('ZFHX3')
+tfs<- c('PBX1','OTX2','ZFHX3','FOXP1','POU2F2','PBX3')
+tfs <- c('NFE2L1')
+
+dir = '~/Desktop/Sara/dev/GRNs_gene'
+genes = rownames(hGRNs)
+hgrn <- list()
+genetouse <- data.frame()
+for (gene in tfs) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    genetouse <- rbind(genetouse, filter(hmodules, TF == gene & target %in% hgrn[[x]]))
+    i = i+1
+  }
+}
+print(names(hgrn))
+print(head(genetouse))
+
+dir = '~/Desktop/Sara/dev/GRNs_region'
+genes = rownames(hGRNs)
+regiontouse <- c()
+for (gene in tfs) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    df <- filter(hr2g, gene %in% unique(genetouse$target) & region %in% hgrn[[x]])
+    df$TF <- gene
+    df$regulation <- unlist(regmatches(x, gregexpr("[+-]", x)))
+    regiontouse <- rbind(regiontouse, df)
+    i = i+1
+  }
+}
+regiontouse$regulation <- ifelse(regiontouse$regulation == '+',1,-1)
+regiontouse$DA <- ifelse(regiontouse$region %in% DA_human$scenicplus_name, 1, -1)
+regiontouse$DE <- ifelse(regiontouse$target %in% hDEGs,  1, -1)
+print(head(regiontouse))
+
+#load hvg/hvr
+dir = '~/Desktop/Sara/dev/'
+hvg <- unique(readLines(file.path(dir,'hvg-1500.txt'))) 
+hvr <- unique(readLines(file.path(dir,'hvr-1500.txt'))) 
+regiontouse$hvg <- ifelse(regiontouse$target %in% hvg, 1, -1)
+regiontouse$hvr <- ifelse(regiontouse$region %in% hvr,  1, -1)
+print(head(regiontouse))
+
+#filter region to use to include 
+regiontouse <- filter(regiontouse, regulation == 1)
+regiontouse <- filter(regiontouse, hvg > 0  | hvr > 0 | target %in% c('PRDX2','PRDX3','PRDX4','PRDX5'))
+regiontouse <- filter(regiontouse, DA == 1 | DE == 1)
+
+#filter to include only positive regulators
+#regiontouse <- filter(regiontouse, importance_x_rho > 0.001)
+regiontouse <- filter(regiontouse, target %in% c(tfs, hgrn$`OTX2_+_100g`,hgrn$`FOXP1_+_116g`,hgrn$`ZFHX3_+_71g`,
+                                                 hgrn$`PBX1_+_542g`,hgrn$`PBX3_+_318g`,hgrn$`POU2F2_+_176g`))
+regiontouse <- filter(regiontouse, region %in% c(hgrn_region$`OTX2_+_369r`, hgrn_region$`FOXP1_+_206r`,hgrn_region$`ZFHX3_+_94r`,
+                      hgrn_region$`PBX1_+_1011r`,hgrn_region$`PBX3_+_486r`,hgrn_region$`POU2F2_+_540r`))
+
+regiontouse <- filter(regiontouse, target %in% c(tfs, hgrn$`NFE2L1_+_515g`))
+regiontouse <- filter(regiontouse, region %in% hgrn_region$`NFE2L1_+_873r`)
+print(head(regiontouse))
+```
+
+```{r}
+df <- as.data.frame(table(regiontouse$target))
+hubs <- head(df[order(df$Freq, decreasing = TRUE), ]$Var1,20)
+```
+
+
+```{r}
+#formulate gene graph for ggraph
+set.seed(123)
+library(tidyr)
+library(dplyr)
+library(tidygraph)
+
+
+tf2r <- regiontouse
+colnames(tf2r)[which(names(tf2r) == "TF")] <- "source"
+colnames(tf2r)[which(names(tf2r) == "target")] <- "gene"
+colnames(tf2r)[which(names(tf2r) == "region")] <- "target"
+tf2r$porg <- "peaks"
+
+r2g <- regiontouse
+colnames(r2g)[which(names(r2g) == "region")] <- "source"
+colnames(r2g)[which(names(r2g) == "target")] <- "target"
+r2g$porg <- "genes"
+
+cols <- intersect(colnames(tf2r), colnames(r2g))
+gene_net <- rbind(tf2r[,cols], r2g[,cols])
+gene_net <- gene_net %>%
+    dplyr::select(source, target, everything()) %>%
+    dplyr::group_by(target) 
+
+#nodes to label
+net_tfs <- c(tfs, intersect(hgrn$`ZFHX3_+_71g`,hDEGs))
+
+gene_graph <- as_tbl_graph(gene_net) %>%
+  activate(edges) %>%
+  mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+  mutate(dir=sign(importance_x_rho)) %>%
+  activate(nodes) %>%
+  mutate(centrality=centrality_pagerank()) %>%
+  mutate(DE=ifelse(name %in% DA_human$scenicplus_name | name %in% hDEGs, 'upregulated DE/DAR in humans','Others')) %>%
+  mutate(type=ifelse(startsWith(name, "chr"), 'peaks','genes')) %>%
+  mutate(highlight=ifelse(name %in% net_tfs, 'yes','no'))
+
+
+```
+
+
+
+
+
+
+```{r}
+circular = FALSE
+#circular = TRUE
+color_edges = FALSE
+edge_width = 0.2
+edge_color = c('-1'='darkgrey', '1'='orange')
+node_size = 1.5
+text_size = 10
+color_nodes = TRUE
+#node_color = c('-1'='darkgrey', '1'="#F4A339")
+#node_size = c('peaks'=1, 'genes'=2)
+#node_size = c('no'=1, 'yes'=2)
+label_nodes = 'tfs'
+#label_nodes = 'all'
+
+unique_colors <- unique((rbind(tf2r[,cols], r2g[,cols]))$porg)  # Get unique values from your data
+fill_color <- setNames(c("darkgrey", "orange"), unique_colors)
+
+unique_colors <- c('upregulated DE/DAR in humans','Others') 
+border_color <- setNames(c("black","lightgrey"), unique_colors)
+
+library(ggraph)
+library(tidygraph)
+
+p <- ggraph(gene_graph, layout='tree', circular=circular)
+
+if (color_edges){
+  p <- p + geom_edge_diagonal(aes(color=factor(dir)), width=edge_width, repel=TRUE) +
+    scale_edge_color_manual(values=edge_color)
+  } else {
+    p <- p + geom_edge_diagonal(width=edge_width, color=edge_color[1], repel=TRUE)
+  }
+
+if (color_nodes){
+  p <- p + geom_node_point(aes(fill=factor(type), color=factor(DE)), shape=21, size=node_size, stroke = 1) +
+    scale_color_manual(values=border_color)  + 
+    scale_fill_manual(values=fill_color)
+   } else {
+    p <- p + geom_node_point(
+  color='darkgrey', shape=21, fill='lightgrey', size=node_size, stroke=0.5)
+    }
+
+
+df <- as.data.frame(table(regiontouse$target))
+hubs <- head(df[order(df$Freq, decreasing = TRUE), ]$Var1,15)
+
+#net_tfs <- c(tfs,ROSgenes,c('PRDX2','PRDX3','PRDX4','PRDX5'))
+#net_tfs <- c(tfs, intersect(hgrn$`ZFHX3_+_71g`,hDEGs))
+net_tfs <- c(tfs,intersect(hDEGs,hubs))
+#net_tfs <- c(tfs,intersect(hDEGs,hubs),c('PRDX2','PRDX3','PRDX4','PRDX5'),intersect(hDEGs,setdiff(hgrn$`ZFHX3_+_71g`,cgrn$`ZFHX3_+_142g`)))
+
+
+if (label_nodes=='tfs'){
+  p <- p + geom_node_label(
+    aes(label=name, filter=name%in%net_tfs),
+    size=text_size/ggplot2::.pt,
+    label.padding=unit(0.1, 'line'),
+    repel=TRUE
+    )
+  } else if (label_nodes=='all'){
+    p <- p + geom_node_label(
+      aes(label=name),
+      size=text_size/ggplot2::.pt,
+      label.padding=unit(0.1, 'line'),
+      repel=TRUE
+      )
+    } else {
+      p <- p + geom_node_label(
+      aes(label=name, filter=name==tf),
+      size=text_size/ggplot2::.pt,
+      label.padding=unit(0.1, 'line'),
+      repel=TRUE
+      )
+    }
+
+p <- p + #scale_size_continuous(range=node_size) +
+  theme_void() #+ no_legend()
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'Network-all.pdf',sep=''),width=12, height=2)
+print(p)
+dev.off()
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'Network-ZFHX3.pdf',sep=''),width=5, height=1.5)
+print(p)
+dev.off()
+```
+```{r}
+#for nfe2l1 plot
+set.seed(123)   
+library(richR) 
+library(ggpubr)
+hsago <- buildAnnot(species="human",keytype="SYMBOL",anntype = "GO")
+#get all the genes under GO0042744: hydrogen peroxide catabolic process
+ROSgenes <- unique(filter(as.data.frame(hsago), GOALL =='GO:0042744')$GeneID)
+#get all the genes under GO:0072593: hydrogen peroxide catabolic process
+ROSgenes <- unique(filter(as.data.frame(hsago), GOALL =='GO:0072593')$GeneID)
+```
+
+
+```{r}
+circular = FALSE
+#circular = TRUE
+color_edges = FALSE
+edge_width = 0.2
+edge_color = c('-1'='darkgrey', '1'='orange')
+node_size = 1.5
+text_size = 10
+color_nodes = TRUE
+#node_color = c('-1'='darkgrey', '1'="#F4A339")
+#node_size = c('peaks'=1, 'genes'=2)
+node_size = c('no'=1.5, 'yes'=2)
+label_nodes = 'tfs'
+#label_nodes = 'all'
+
+unique_colors <- unique((rbind(tf2r[,cols], r2g[,cols]))$porg)  # Get unique values from your data
+fill_color <- setNames(c("darkgrey", "orange"), unique_colors)
+
+unique_colors <- c('DE/DA','Others') 
+border_color <- setNames(c("black","lightgrey"), unique_colors)
+
+library(ggraph)
+library(tidygraph)
+
+p <- ggraph(gene_graph, layout='tree', circular=circular)
+
+if (color_edges){
+    p <- p + geom_edge_diagonal(aes(color=factor(dir)), width=edge_width, repel=TRUE) +
+        scale_edge_color_manual(values=edge_color)
+} else {
+    p <- p + geom_edge_diagonal(width=edge_width, color=edge_color[1], repel=TRUE)
+}
+
+if (color_nodes){
+    p <- p + geom_node_point(aes(fill=factor(type), color=factor(DE), size=factor(highlight)), shape = 21 ,  stroke = 1) +
+        scale_color_manual(values=border_color)  + 
+        scale_fill_manual(values=fill_color)
+} else {
+    p <- p + geom_node_point(
+        color='darkgrey', shape=21, fill='lightgrey', size=node_size, stroke=0.5)
+}
+
+
+df <- as.data.frame(table(regiontouse$target))
+hubs <- head(df[order(df$Freq, decreasing = TRUE), ]$Var1,10)
+
+#net_tfs <- c(tfs,hDEGs,c('PRDX2','PRDX3','PRDX4','PRDX5'))
+
+#net_tfs <- c(tfs, intersect(hgrn$`ZFHX3_+_71g`,hDEGs))
+#net_tfs <- c(tfs,intersect(hDEGs,hubs),c('PRDX2','PRDX3','PRDX4','PRDX5'),intersect(hDEGs,setdiff(hgrn$`ZFHX3_+_71g`,cgrn$`ZFHX3_+_142g`)))
+
+
+if (label_nodes=='tfs'){
+    p <- p + geom_node_label(
+        aes(label=name, filter=name%in%net_tfs),
+        size=text_size/ggplot2::.pt,
+        label.padding=unit(0.1, 'line'),
+        repel=TRUE
+    )
+} else if (label_nodes=='all'){
+    p <- p + geom_node_label(
+        aes(label=name),
+        size=text_size/ggplot2::.pt,
+        label.padding=unit(0.1, 'line'),
+        repel=TRUE
+    )
+} else {
+    p <- p + geom_node_label(
+        aes(label=name, filter=name==tf),
+        size=text_size/ggplot2::.pt,
+        label.padding=unit(0.1, 'line'),
+        repel=TRUE
+    )
+}
+
+p <- p + #scale_size_continuous(range=node_size) +
+    theme_void() #+ no_legend()
+
+p
+```
+
+
+
+

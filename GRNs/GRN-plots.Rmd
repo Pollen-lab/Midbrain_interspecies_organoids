@@ -1,0 +1,1929 @@
+---
+title: "GRN-midbrain"
+output: html_notebook
+---
+
+
+```{r load seacelled obj}
+library(zellkonverter)
+library(Seurat)
+
+dir = '~/Desktop/Sara/dev'
+setwd(dir)
+
+#sourcefile <- file.path(dir, 'DA.h5ad')
+sourcefile <- file.path(dir, 'SCVI_query.raw.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+print(head(ad@assays@data$counts))
+ad <- as.Seurat(ad, counts = "counts",data = "counts")
+```
+```{r}
+library(zellkonverter)
+library(Seurat)
+
+dir = '~/Desktop/Sara/D16'
+setwd(dir)
+
+sourcefile <- file.path(dir, '20240221_GEX_all_D16.raw.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+print(head(ad@assays@data$counts))
+ad <- as.Seurat(ad, counts = "counts",data = "counts")
+```
+
+
+```{r}
+library(zellkonverter)
+library(Seurat)
+
+dir = '~/Desktop/Sara/rot'
+setwd(dir)
+sourcefile <- file.path(dir, 'rot.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+print(head(ad@assays@data$counts))
+ad <- as.Seurat(ad, counts = "counts",data = "counts")
+```
+
+
+```{r preprocessing rna exp}
+ad <- NormalizeData(ad, normalization.method = "LogNormalize", scale.factor = 10000)
+ad <- FindVariableFeatures(ad, selection.method = "vst", nfeatures = 2000)
+ad <- ScaleData(ad, features = rownames(ad))
+ad <- RunPCA(ad, features = VariableFeatures(object = ad))
+```
+
+
+```{r load GRNs/DEGs-dev}
+library(dplyr)
+
+dir = '~/Desktop/Sara/dev'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+hmodules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+hGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(hGRNs) <- hGRNs$TF
+#number of regions
+sourcefile <- file.path(dir, 'GRN_signatures_region.csv')
+GRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(GRNs) <- GRNs$TF
+GRNs <- GRNs[rownames(hGRNs), ]
+hGRNs$regions <- GRNs$regions
+
+dir = '~/Desktop/Sara/dev/chimp'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+cmodules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+cGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(cGRNs) <- cGRNs$TF
+#number of regions
+sourcefile <- file.path(dir, 'GRN_signatures_region.csv')
+GRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(GRNs) <- GRNs$TF
+GRNs <- GRNs[rownames(cGRNs), ]
+cGRNs$regions <- GRNs$regions
+
+#human/chimp specific genes in DA lineage
+dir = '~/Desktop/Sara/DE'
+hDEGs <- c()
+for (x in list.files(dir)) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  hDEGs <- union(hDEGs, filter(read.csv(file.path(dir,x),header = TRUE), specificity == "human_specific" & sign_hvc > 0)$ID)
+}
+print(length(hDEGs))
+
+
+cDEGs <- c()
+for (x in list.files(dir)) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  cDEGs <- union(cDEGs, filter(read.csv(file.path(dir,x),header = TRUE), specificity == "chimp_specific" & sign_hvc < 0)$ID)
+}
+print(length(cDEGs))
+
+dir = '~/Desktop/Sara/dev/GRNs_gene'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(hgrn))
+
+dir = '~/Desktop/Sara/dev/chimp/GRNs_gene'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(cgrn))
+```
+
+```{r}
+library(dplyr)
+
+dir = '~/Desktop/Sara/D16/human'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+hmodules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+hGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(hGRNs) <- hGRNs$TF
+#number of regions
+sourcefile <- file.path(dir, 'GRN_signatures_region.csv')
+GRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(GRNs) <- GRNs$TF
+GRNs <- GRNs[rownames(hGRNs), ]
+hGRNs$regions <- GRNs$regions
+
+dir = '~/Desktop/Sara/D16/chimp'
+#TF to gene info
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+cmodules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+cGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(cGRNs) <- cGRNs$TF
+#number of regions
+sourcefile <- file.path(dir, 'GRN_signatures_region.csv')
+GRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(GRNs) <- GRNs$TF
+GRNs <- GRNs[rownames(cGRNs), ]
+cGRNs$regions <- GRNs$regions
+
+
+dir = '~/Desktop/Sara/D16/human/GRNs_gene'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(hgrn))
+
+dir = '~/Desktop/Sara/D16/chimp/GRNs_gene'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(cgrn))
+```
+
+
+```{r load GRNs/DEGs-rot}
+dir = '~/Desktop/Sara/rot'
+#TF to gene info
+#sourcefile <- file.path(dir, 'TF2G_adj.csv')
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+modules <- read.csv(sourcefile,sep=',')
+#number of targets
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+hGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(hGRNs) <- hGRNs$TF
+
+dir = '~/Desktop/Sara/rot/GRNs'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(hgrn))
+
+#chimp
+dir = '~/Desktop/Sara/rot/chimp'
+#sourcefile <- file.path(dir, 'TF2G_adj.csv')
+sourcefile <- file.path(dir, 'TF2G_adj_all.csv')
+modules <- read.csv(sourcefile,sep=',')
+sourcefile <- file.path(dir, 'GRN_signatures.csv')
+cGRNs <- read.csv(sourcefile,sep=',',row.names = 1)
+rownames(cGRNs) <- cGRNs$TF
+
+dir = '~/Desktop/Sara/rot/chimp/GRNs_gene'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+  names = gsub('.txt','',list.files(dir, pattern = gene ))
+  i = 1
+  for (x in names) {
+    cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+    i = i+1
+  }
+}
+print(names(cgrn))
+
+#union of 3 DA subtypes
+dir = '~/Desktop/Sara/rot/DE'
+#rot upregulated genes
+upDEGs <- list()
+downDEGs <- list()
+for (x in list.files(dir,pattern = "rotenone_cond")) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  upDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC > 0 )$ID
+  downDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC < 0 )$ID
+}
+upDEGs$intersect <- intersect(upDEGs$DA_neurons_de_genes_rotenone_cond24hr, upDEGs$DA_neurons_de_genes_rotenone_cond72hr)
+downDEGs$intersect <- intersect(downDEGs$DA_neurons_de_genes_rotenone_cond24hr, downDEGs$DA_neurons_de_genes_rotenone_cond72hr)
+print(length(upDEGs$intersect))
+print(length(downDEGs$intersect))
+```
+```{r}
+my_list <- hgrn
+
+max_length <- max(sapply(my_list, length))
+
+# Pad each element of the list with NAs to make them the same length
+padded_list <- lapply(my_list, function(x) {
+  length(x) <- max_length
+  return(x)
+})
+# Convert the list to a data frame
+df <- as.data.frame(padded_list,check.names = FALSE)
+df[is.na(df)] <- ""
+write.csv(df, "~/Desktop/output.csv", row.names = FALSE)
+```
+
+
+
+```{r load required packages/functions}
+detach("package:dplyr", unload = TRUE)
+
+library(plyr); library(doParallel); library(foreach)
+
+map_par <- function(x, fun, parallel=FALSE, verbose=TRUE){
+    if (!parallel & (verbose==1)){
+        return(pbapply::pblapply(X=x, FUN=fun))
+    }
+    if (!parallel & (verbose!=1)){
+        return(base::lapply(X=x, FUN=fun))
+    }
+    if (parallel){
+        outlist <- foreach::foreach(i=1:length(x)) %dopar% {fun(x[[i]])}
+        names(outlist) <- names(x)
+        return(outlist)
+    }
+}
+```
+
+
+```{r define sparse_cor imported from pando}
+library(Matrix)
+
+sparse_covcor <- function(x, y=NULL) {
+    if (!is(x, "dgCMatrix")) stop("x should be a dgCMatrix")
+    if (is.null(y)) {
+        n <- nrow(x)
+        muX <- colMeans(x)
+        covmat <- (as.matrix(crossprod(x)) - n * tcrossprod(muX)) / (n-1)
+        sdvec <- sqrt(diag(covmat))
+        cormat <- covmat / tcrossprod(sdvec)
+        return(list(cov=covmat, cor=cormat))
+    } else {
+        if (!is(y, "dgCMatrix")) stop("y should be a dgCMatrix")
+        if (nrow(x) != nrow(y)) stop("x and y should have the same number of rows")
+        n <- nrow(x)
+        muY <- colMeans(y)
+        muX <- colMeans(x)
+        covmat <- (as.matrix(crossprod(x, y)) - n * tcrossprod(muX, muY)) / (n-1)
+        sdvecX <- sqrt((colSums(x^2) - n*muX^2) / (n-1))
+        sdvecY <- sqrt((colSums(y^2) - n*muY^2) / (n-1))
+        cormat <- covmat / tcrossprod(sdvecX, sdvecY)
+        return(list(cov=covmat, cor=cormat))
+    }
+}
+
+sparse_cor <- function(
+    x,
+    y = NULL,
+    method = 'pearson',
+    allow_neg = TRUE,
+    remove_na = TRUE,
+    remove_inf = TRUE,
+    ...
+){
+    if (method == 'pearson'){
+        x <- Matrix(x, sparse=TRUE)
+        if (!is.null(y)){
+            y <- Matrix(y, sparse=TRUE)
+        }
+        corr_mat <- sparse_covcor(x, y)$cor
+    } else if (method == 'spearman' & require(presto, quietly=TRUE)){
+        xr <- Matrix(presto::rank_matrix(t(x))$X_ranked, sparse=TRUE)
+        rownames(xr) <- rownames(x)
+        colnames(xr) <- colnames(x)
+        if (!is.null(y)){
+            yr <- Matrix(presto::rank_matrix(t(y))$X_ranked, sparse=TRUE)
+            rownames(yr) <- rownames(y)
+            colnames(yr) <- colnames(y)
+            y <- yr
+        }
+        corr_mat <- sparse_covcor(xr, y)$cor
+    } else {
+        x <- as.matrix(x)
+        if (!is.null(y)){
+            y <- as.matrix(y)
+        }
+        corr_mat <- stats::cor(x, y, method=method, ...)
+    }
+    if (remove_na){
+        corr_mat[is.na(corr_mat)] <- 0
+    }
+    if (remove_inf){
+        corr_mat[is.infinite(corr_mat)] <- 1
+    }
+    corr_mat <- Matrix(corr_mat, sparse=TRUE)
+    if (!allow_neg){
+        corr_mat[corr_mat < 0] <- 0
+    }
+    return(corr_mat)
+}
+```
+
+
+```{r rot network}
+set.seed(123)
+library(umap)
+library(Matrix)
+library(tidyr)
+library(dplyr)
+
+
+features <- rownames(hGRNs)
+
+
+rna_expr <- t(LayerData(ad, assay='originalexp', layer='scale.data'))
+features <- intersect(features, colnames(rna_expr))
+
+rna_expr <- rna_expr[, features]
+gene_cor <- sparse_cor(rna_expr)
+
+
+gene_cor_df <- gene_cor %>%
+  as_tibble(rownames='source') %>%
+  pivot_longer(!source, names_to='target', values_to='corr')
+
+
+modules_use <- hmodules %>%
+  filter(target%in%colnames(rna_expr), TF%in%colnames(rna_expr))
+
+
+gene_net <- modules_use %>%
+  dplyr::select(TF, target, everything()) %>%
+  dplyr::group_by(target) %>%
+  dplyr::left_join(gene_cor_df, by=c('TF'='source', 'target'='target')) %>%
+  {.$corr[is.na(.$corr)] <- 0; .}
+
+#use importance_x_rho as coefficient
+reg_mat <- gene_net %>%
+  dplyr::select(target, TF, importance_x_rho) %>%
+  tidyr::pivot_wider(names_from=TF, values_from=importance_x_rho, values_fill=0) %>%
+  tibble::column_to_rownames('target') %>% as.matrix()
+
+
+#log_message('Computing weighted regulatory factor', verbose=verbose)
+# Layout with UMAP on adjacency matrix
+reg_factor_mat <- abs(reg_mat) + 1
+coex_mat <- gene_cor[rownames(reg_factor_mat), colnames(reg_factor_mat)] * sqrt(reg_factor_mat)
+
+
+#log_message('Computing UMAP embedding', verbose=verbose)
+coex_umap <- umap(as.matrix(coex_mat), n_neighbors = 15)$layout %>%
+        {colnames(.) <- c('UMAP_1', 'UMAP_2'); .} %>%
+        as_tibble(rownames='gene')
+
+#add number of target genes
+coex_umap$human.targets <- hGRNs[coex_umap$gene , ]$genes
+coex_umap$human.targets.region <- hGRNs[coex_umap$gene , ]$regions
+coex_umap <- coex_umap %>% mutate(human.targets = coalesce(human.targets, 0))
+coex_umap$log.targets <- log(coex_umap$human.targets + 1)
+
+#intersect with chimp
+#coex_umap <- coex_umap[coex_umap$gene %in% intersect(coex_umap$gene,rownames(GRNs)),]
+
+#add number of rot responsive genes
+up <- c()
+down <- c()
+for (gene in coex_umap$gene) {
+  #print(gene)
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  grn_name <- grn_name[grep("+[_]",grn_name)]
+  #print(grn_name)
+  up <- c(up, length(intersect(upDEGs$intersect, hgrn[[grn_name]])))
+  down <- c(down, length(intersect(downDEGs$intersect, hgrn[[grn_name]])))
+}
+coex_umap$rot.up <- up
+coex_umap$rot.down <- down
+coex_umap$perc.rot.up <- coex_umap$rot.up/coex_umap$human.targets*100
+coex_umap$perc.rot.down <- coex_umap$rot.down/coex_umap$human.targets*100
+
+#log_message('Getting network graph', verbose=verbose)
+
+library(tidygraph)
+gene_graph <- as_tbl_graph(gene_net) %>%
+  activate(edges) %>%
+  mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+  mutate(dir=sign(importance_x_rho)) %>%
+  activate(nodes) %>%
+  mutate(centrality=centrality_pagerank()) %>%
+  inner_join(coex_umap, by=c('name'='gene')) 
+
+```
+
+
+```{r calculate GRN umap, adapted from pando}
+set.seed(123)
+library(umap)
+library(Matrix)
+library(tidyr)
+library(dplyr)
+
+
+features <- rownames(hGRNs)
+
+#features <- c(features,intersect(DEGs, union(union(grn$`SOX4_+_54g`,grn$`PBX1_+_92g`),grn$`POU3F2_+_118g`)))
+
+
+rna_expr <- t(LayerData(ad, assay='originalexp', layer='scale.data'))
+features <- intersect(features, colnames(rna_expr))
+
+rna_expr <- rna_expr[, features]
+gene_cor <- sparse_cor(rna_expr)
+
+
+gene_cor_df <- gene_cor %>%
+  as_tibble(rownames='source') %>%
+  pivot_longer(!source, names_to='target', values_to='corr')
+
+
+modules_use <- hmodules %>%
+  filter(target%in%colnames(rna_expr), TF%in%colnames(rna_expr)) %>%
+  filter(rho > 0.05)
+
+
+gene_net <- modules_use %>%
+  dplyr::select(TF, target, everything()) %>%
+  dplyr::group_by(target) %>%
+  dplyr::left_join(gene_cor_df, by=c('TF'='source', 'target'='target')) %>%
+  {.$corr[is.na(.$corr)] <- 0; .}
+
+#use importance_x_rho as coefficient
+reg_mat <- gene_net %>%
+  dplyr::select(target, TF, importance_x_rho) %>%
+  tidyr::pivot_wider(names_from=TF, values_from=importance_x_rho, values_fill=0) %>%
+  tibble::column_to_rownames('target') %>% as.matrix()
+
+
+#log_message('Computing weighted regulatory factor', verbose=verbose)
+# Layout with UMAP on adjacency matrix
+reg_factor_mat <- abs(reg_mat) + 1
+coex_mat <- gene_cor[rownames(reg_factor_mat), colnames(reg_factor_mat)] * sqrt(reg_factor_mat)
+
+
+#log_message('Computing UMAP embedding', verbose=verbose)
+coex_umap <- umap(as.matrix(coex_mat), n_neighbors = 15)$layout %>%
+        {colnames(.) <- c('UMAP_1', 'UMAP_2'); .} %>%
+        as_tibble(rownames='gene')
+
+
+#add number of target genes
+coex_umap$human.targets.gene <- hGRNs[coex_umap$gene , ]$genes
+coex_umap$human.targets.region <- hGRNs[coex_umap$gene , ]$regions
+coex_umap <- coex_umap %>% mutate(human.targets.gene = coalesce(human.targets.gene, 0))
+coex_umap$log.targets.gene <- log(coex_umap$human.targets.gene + 1)
+coex_umap$log.targets.region <- log(coex_umap$human.targets.region + 1)
+
+#export umap info
+#dir = '~/Desktop/Sara/dev'
+#write.csv(coex_umap,  file.path(dir, 'coex_umap.csv'))
+
+dir = '~/Desktop/Sara/dev'
+coex_umap <- as_tibble(read.csv(file.path(dir, 'coex_umap.csv')))
+
+#intersect with chimp
+coex_umap <- coex_umap[coex_umap$gene %in% intersect(coex_umap$gene,rownames(cGRNs)),]
+
+coex_umap$chimp.targets.gene <- cGRNs[coex_umap$gene , ]$genes
+coex_umap$chimp.targets.region <- cGRNs[coex_umap$gene , ]$regions
+coex_umap <- coex_umap %>% mutate(chimp.targets.gene = coalesce(chimp.targets.gene, 0))
+coex_umap$log.chimp.targets.gene <- log(coex_umap$chimp.targets.gene + 1)
+coex_umap$log.chimp.targets.region <- log(coex_umap$chimp.targets.region + 1)
+
+#add number of human specific genes
+result <- c()
+for (gene in coex_umap$gene) {
+  #print(gene)
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  #grn_name <- grn_name[grep("+[_]",grn_name)]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  #print(grn_name)
+  result <- c(result, length(intersect(hDEGs, hgrn[[grn_name]])))
+}
+coex_umap$human.specific <- result
+coex_umap$log.human.specific <- log(coex_umap$human.specific + 1)
+coex_umap$perc.human.specific <- coex_umap$human.specific/coex_umap$human.targets.gene*100
+
+result <- c()
+for (gene in coex_umap$gene) {
+  #print(gene)
+  grn_name <- names(cgrn)[grep(paste(gene,'_',sep=''),names(cgrn))]
+  #grn_name <- grn_name[grep("+[_]",grn_name)]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  #print(grn_name)
+  result <- c(result, length(intersect(cDEGs, cgrn[[grn_name]])))
+}
+coex_umap$chimp.specific <- result
+coex_umap$log.chimp.specific <- log(coex_umap$chimp.specific + 1)
+coex_umap$perc.chimp.specific <- coex_umap$chimp.specific/coex_umap$chimp.targets.gene*100
+
+result <- c()
+for (gene in coex_umap$gene) {
+  #print(gene)
+  hgrn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  hgrn_name <- grep("\\+", hgrn_name, value = TRUE)
+  cgrn_name <- names(cgrn)[grep(paste(gene,'_',sep=''),names(cgrn))]
+  cgrn_name <- grep("\\+", cgrn_name, value = TRUE)
+  #print(grn_name)
+  result <- c(result, length(intersect(hgrn[[hgrn_name]], cgrn[[cgrn_name]])))
+}
+coex_umap$overlap.target <- result
+coex_umap$perc.overlap.target <- coex_umap$overlap.target/(coex_umap$human.targets.gene + coex_umap$chimp.targets.gene - coex_umap$overlap.target) *100
+coex_umap$perc.overlap.target.human <- coex_umap$overlap.target/coex_umap$human.targets.gene*100
+coex_umap$perc.overlap.target.chimp <- coex_umap$overlap.target/coex_umap$chimp.targets.gene*100
+
+#log_message('Getting network graph', verbose=verbose)
+
+library(tidygraph)
+gene_graph <- as_tbl_graph(gene_net) %>%
+  activate(edges) %>%
+  mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+  mutate(dir=sign(importance_x_rho)) %>%
+  activate(nodes) %>%
+  mutate(centrality=centrality_pagerank()) %>%
+  inner_join(coex_umap, by=c('name'='gene')) 
+
+```
+
+
+
+```{r}
+library(ggraph)
+
+edge_width = 0.1
+edge_color = c('-1'='darkgrey', '1'='orange')
+node_color = pals::magma(100)
+node_size = c(1,5)
+text_size = 10
+color_nodes = TRUE
+label_nodes = TRUE
+color_edges = FALSE
+
+p <- ggraph(gene_graph, x=UMAP_1, y=UMAP_2)
+
+#edge width = importance_x_abs_rho
+if (color_edges){
+  p <- p + geom_edge_diagonal(aes(color=factor(dir), width=importance_x_abs_rho)) +
+        scale_edge_width(range = c(0.2, 1)) +
+        scale_edge_color_manual(values=edge_color)
+  } else {
+  p <- p + geom_edge_diagonal(width=edge_width, color=edge_color[1])
+  }
+
+if (color_nodes){
+  p <- p + geom_node_point(aes(size=log.targets.region, fill=log.targets.gene), color='darkgrey', shape=21) +
+    scale_fill_gradientn(colors=node_color)
+  } else {
+    p <- p + geom_node_point(
+      color='darkgrey', shape=21, fill='lightgrey', size=node_size[1], stroke=0.5
+        )
+    }
+
+if (label_nodes){
+        p <- p + geom_node_text(
+            aes(label = name),
+            repel=T, size=text_size/ggplot2::.pt, max.overlaps=99999
+        )
+}
+
+    
+#p <- p + scale_size_continuous(range=node_size) +
+#        theme_void() + 
+#  annotate("rect", xmin = -2.5, xmax = 0.5, ymin = 1.2, ymax = 2.6, alpha = .2,fill = "white", colour = 'grey') + 
+# annotate("text", x = -2.3, y = 2.7, label = "Progenitor.Enriched") +
+#  annotate("rect", xmin = 1, xmax = 2.8, ymin = -1.8, ymax = 0.4, alpha = .2,fill = "white", colour = 'grey') + 
+#  annotate("text", x = 2.4, y = 0.5, label = "Midbrain.Neuron.Enriched")
+
+p <- p + scale_size_continuous(range=node_size) +
+    theme_void() + 
+    annotate("rect", xmin = -1.8, xmax = 0.4, ymin = 2.0, ymax = 3.4, alpha = .2,fill = "white", colour = 'grey') + 
+    annotate("text", x = -1.1, y = 3.5, label = "Progenitor-enriched") +
+    annotate("rect", xmin = 0.5, xmax = 2.5, ymin = -2.9, ymax = -0.9, alpha = .2,fill = "white", colour = 'grey') + 
+    annotate("text", x = 1.6, y = -3, label = "Midbrain neuron-enriched") +
+    annotate("rect", xmin = -0.4, xmax = 1.2, ymin = 0.6, ymax = 1.9, alpha = .2,fill = "white", colour = 'grey') + 
+    annotate("text", x = 1.75, y = 1.2, label = "DA lineage\n-enriched")
+
+
+fig_dir='~/Desktop/Sara/dev'
+pdf(paste(fig_dir, 'TF-umap-humandev.pdf',sep=''),width=7, height=8)
+print(p)
+dev.off()
+```
+
+```{r Fishers exact test for gene overlap}
+#human/chimp specific genes in DA lineage
+#dir = '~/Desktop/Sara/dev'
+#df <- read.csv(file.path(dir, 'coex_umap.csv'))
+df <- as.data.frame(coex_umap)
+rownames(df) <- df$gene
+
+dir = '~/Desktop/Sara/DE'
+species ='human'
+for (x in list.files(dir)) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  hDEGs <- filter(read.csv(file.path(dir,x),header = TRUE), specificity == "human_specific" & sign_hvc > 0)$ID
+  DEGs <-  filter(read.csv(file.path(dir,x),header = TRUE), specificity != "human_specific" | sign_hvc < 0)$ID
+  print(length(hDEGs))
+  print(length(DEGs))
+  df$HS = 0 
+  df$otherDE = 0 
+  df[[paste0(species, name,'p.value')]] = 1
+  for (gene in df$gene) {
+    grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+    grn_name <- grep("\\+", grn_name, value = TRUE)
+    df[gene,'HS'] <- length(intersect(hDEGs, hgrn[[grn_name]]))
+    df[gene,'otherDE'] <- length(intersect(DEGs, hgrn[[grn_name]]))
+    df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.gene')]*100
+    df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDE']),
+                                                      c(length(hDEGs) - df[gene,'HS'] ,length(DEGs) - df[gene,'otherDE'] )), alternative="greater")$p.value
+  }
+}
+
+#intersect with chimp
+df <- df[df$gene %in% intersect(df$gene,rownames(cGRNs)),]
+species ='chimp'
+for (x in list.files(dir)) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  hDEGs <- filter(read.csv(file.path(dir,x),header = TRUE), specificity == "chimp_specific" & sign_hvc < 0)$ID
+  DEGs <-  filter(read.csv(file.path(dir,x),header = TRUE), specificity != "chimp_specific" | sign_hvc > 0)$ID
+  print(length(hDEGs))
+  print(length(DEGs))
+  df$HS = 0 
+  df$otherDE = 0 
+  df[[paste0(species,name,'p.value')]] = 1
+  for (gene in df$gene) {
+    grn_name <- names(cgrn)[grep(paste(gene,'_',sep=''),names(cgrn))]
+    grn_name <- grep("\\+", grn_name, value = TRUE)
+    df[gene,'HS'] <- length(intersect(hDEGs, cgrn[[grn_name]]))
+    df[gene,'otherDE'] <- length(intersect(DEGs, cgrn[[grn_name]]))
+    df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.gene')]*100
+    df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDE']),
+                                                      c(length(hDEGs) - df[gene,'HS'] ,length(DEGs) - df[gene,'otherDE'] )), alternative="greater")$p.value
+  }
+}
+    
+chimp <-  union(union(rownames(filter(df, , df$chimpDA_STN_neurons_immature_polarize_summaryp.value < 0.05)),
+                rownames(filter(df, , df$chimpDA_neurons_polarize_summaryp.value < 0.05))),
+                rownames(filter(df, , df$chimpvMB_progenitors_polarize_summaryp.value < 0.05)))
+human <-  union(union(rownames(filter(df, , df$humanDA_STN_neurons_immature_polarize_summaryp.value < 0.05)),
+                rownames(filter(df, , df$humanDA_neurons_polarize_summaryp.value < 0.05))),
+                rownames(filter(df, , df$humanvMB_progenitors_polarize_summaryp.value < 0.05)))
+
+df$p.significance <- c()
+for (gene in df$gene) {
+  if (gene %in% intersect(chimp,human)){
+    df[gene, 'p.significance'] <- 'Human, Chimp' 
+  } else if (gene %in% human) {
+    df[gene, 'p.significance'] <- 'Human' 
+  } else if (gene %in% chimp) {
+    df[gene, 'p.significance'] <- 'Chimp' 
+  } else {
+    df[gene, 'p.significance'] <- 'ns'
+  }
+}
+
+#A: targets that are human-specific DE genes
+#B: targets that are not human-specific DE (human-chimp DEGs that are in other categories)
+#C: nontargets that are human-specific DE genes
+#D : nontargets that are not human-specific DE (human-chimp DEGs that are in other categories)
+```
+
+```{r Fishers exact test for region overlap}
+#human/chimp specific genes in DA lineage
+dir = '~/Desktop/Sara/dev'
+df <- read.csv(file.path(dir, 'coex_umap.csv'))
+#df <- as.data.frame(coex_umap)
+rownames(df) <- df$gene
+
+#load DA peaks
+species='human'
+dir = '~/Desktop/Sara/Dev'
+setwd(dir)
+
+sourcefile <- file.path(dir, 'DA/dars_df.rds')
+rds <- readRDS(sourcefile)
+
+#get human up peaks
+#remove peaks that don't have a correpsonding peak in human
+DA_human <- filter(as.data.frame(rds$human), grepl("Hu",orig_name))
+modified_list <- unlist(lapply(DA_human$orig_name, function(x) strsplit(x, ";")[[1]]))
+DA_human$orig_name <- modified_list[grepl("Hu", modified_list)]
+#subset to human up peaks
+DA_human <- filter(DA_human, logFC > 0)
+#get all peaks w human orig names
+DA_others <- filter(rbind(as.data.frame(rds$human),as.data.frame(rds$chimp),as.data.frame(rds$rhesus)), grepl("Hu",orig_name))
+modified_list <- unlist(lapply(DA_others$orig_name, function(x) strsplit(x, ";")[[1]]))
+DA_others$orig_name <- modified_list[grepl("Hu", modified_list)]
+#remove intersection w human specific up
+DA_others <- filter(DA_others, orig_name %in% setdiff(DA_others$orig_name, DA_human$orig_name))
+
+sourcefile <- file.path(dir, 'DA/peaks.rds')
+rds <- readRDS(sourcefile)
+ref <-  as.data.frame(rds$human)
+ref$scenicplus_name <- paste0(ref$seqnames,':', ref$start,'-',ref$end)
+DA_human <- filter(ref, name %in% DA_human$orig_name)
+DA_others <- filter(ref, name %in% DA_others$orig_name)
+
+#load region based grns
+dir = '~/Desktop/Sara/Dev/GRNs_region'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+    names = gsub('.txt','',list.files(dir, pattern = gene ))
+    i = 1
+    for (x in names) {
+        hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+        i = i+1
+    }
+}
+print(names(hgrn))
+
+name='DA_neurons'
+species='human'
+df$HS = 0 
+df$otherDE = 0 
+df[[paste0(species, name,'p.value')]] = 1
+for (gene in df$gene) {
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  df[gene,'HS'] <- length(intersect(DA_human$scenicplus_name, hgrn[[grn_name]]))
+  df[gene,'otherDA'] <- length(intersect(DA_others$scenicplus_name, hgrn[[grn_name]]))
+  df[gene,paste0(species,'.targets.region')] <- length(hgrn[[grn_name]])
+  df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.region')]*100
+  df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDA']),
+                                                      c(length(DA_human$scenicplus_name) - df[gene,'HS'] ,length(DA_others$scenicplus_name) - df[gene,'otherDA'] )), alternative="greater")$p.value
+  #df[gene, paste0(species, name,'odds.ratio')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDA']),
+  #                                                    c(length(DA_human$scenicplus_name) - df[gene,'HS'] ,length(DA_others$scenicplus_name) - df[gene,'otherDA'] )), alternative="greater")$estimate[[1]]
+  
+  }
+
+#intersect with chimp
+#load DA peaks
+species='chimp'
+dir = '~/Desktop/Sara/Dev'
+setwd(dir)
+
+sourcefile <- file.path(dir, 'DA/dars_df.rds')
+rds <- readRDS(sourcefile)
+DA_chimp <- filter(as.data.frame(rds$chimp), grepl("Ch",orig_name))
+modified_list <- unlist(lapply(DA_chimp$orig_name, function(x) strsplit(x, ";")[[1]]))
+DA_chimp$orig_name <- modified_list[grepl("Ch", modified_list)]
+DA_chimp <- filter(DA_chimp, logFC > 0)
+#get all peaks w human orig names
+DA_others <- filter(rbind(as.data.frame(rds$human),as.data.frame(rds$chimp),as.data.frame(rds$rhesus)), grepl("Ch",orig_name))
+modified_list <- unlist(lapply(DA_others$orig_name, function(x) strsplit(x, ";")[[1]]))
+DA_others$orig_name <- modified_list[grepl("Ch", modified_list)]
+#remove intersection w human specific up
+DA_others <- filter(DA_others, orig_name %in% setdiff(DA_others$orig_name, DA_chimp$orig_name))
+
+sourcefile <- file.path(dir, 'DA/peaks.rds')
+rds <- readRDS(sourcefile)
+ref <-  as.data.frame(rds$chimp)
+ref$scenicplus_name <- paste0(ref$seqnames,':', ref$start,'-',ref$end)
+DA_chimp <- filter(ref, name %in% DA_chimp$orig_name)
+DA_others <- filter(ref, name %in% DA_others$orig_name)
+
+#load region based grns
+dir = '~/Desktop/Sara/Dev/chimp/GRNs_region'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+    names = gsub('.txt','',list.files(dir, pattern = gene ))
+    i = 1
+    for (x in names) {
+        cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+        i = i+1
+    }
+}
+print(names(cgrn))
+
+name='DA_neurons'
+species='chimp'
+df <- filter(df, gene %in% rownames(cGRNs))
+df$HS = 0 
+df$otherDE = 0 
+df[[paste0(species, name,'p.value')]] = 1
+for (gene in df$gene) {
+  grn_name <- names(cgrn)[grep(paste(gene,'_',sep=''),names(cgrn))]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  df[gene,'HS'] <- length(intersect(DA_chimp$scenicplus_name, cgrn[[grn_name]]))
+  df[gene,'otherDA'] <- length(intersect(DA_others$scenicplus_name, cgrn[[grn_name]]))
+  df[gene,paste0(species,'.targets.region')] <- length(cgrn[[grn_name]])
+  df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.region')]*100
+  df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDA']),
+                                                      c(length(DA_chimp$scenicplus_name) - df[gene,'HS'] ,length(DA_others$scenicplus_name) - df[gene,'otherDA'] )), alternative="greater")$p.value
+  }
+
+chimp <- rownames(filter(df, , df$chimpDA_neuronsp.value < 0.05))
+human <-  rownames(filter(df, , df$humanDA_neuronsp.value < 0.05))
+
+df$p.significance <- c()
+for (gene in df$gene) {
+  if (gene %in% intersect(chimp,human)){
+    df[gene, 'p.significance'] <- 'Human, Chimp' 
+  } else if (gene %in% human) {
+    df[gene, 'p.significance'] <- 'Human' 
+  } else if (gene %in% chimp) {
+    df[gene, 'p.significance'] <- 'Chimp' 
+  } else {
+    df[gene, 'p.significance'] <- 'ns'
+  }
+}
+
+#A: targets that are human-specific DE genes
+#B: targets that are not human-specific DE (human-chimp DEGs that are in other categories)
+#C: nontargets that are human-specific DE genes
+#D : nontargets that are not human-specific DE (human-chimp DEGs that are in other categories)
+```
+
+
+```{r Fishers exact test for region overlap}
+#human/chimp specific genes in DA lineage
+dir = '~/Desktop/Sara/dev'
+df <- read.csv(file.path(dir, 'coex_umap.csv'))
+#df <- as.data.frame(coex_umap)
+rownames(df) <- df$gene
+
+#load region based grns
+dir = '~/Desktop/Sara/Dev/GRNs_region'
+genes = rownames(hGRNs)
+hgrn <- list()
+for (gene in genes) {
+    names = gsub('.txt','',list.files(dir, pattern = gene ))
+    i = 1
+    for (x in names) {
+        hgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+        i = i+1
+    }
+}
+print(names(hgrn))
+
+#load region based grns
+dir = '~/Desktop/Sara/Dev/chimp/GRNs_region'
+genes = rownames(cGRNs)
+cgrn <- list()
+for (gene in genes) {
+    names = gsub('.txt','',list.files(dir, pattern = gene ))
+    i = 1
+    for (x in names) {
+        cgrn[[x]] <- unique(readLines(file.path(dir,(list.files(dir, pattern = gene)[i])))) 
+        i = i+1
+    }
+}
+print(names(cgrn))
+
+
+dir = '~/Desktop/Sara/Dev'
+species='human'
+for (name in c('vMB_progenitors','DA_STN_neurons_immature','DA_neurons')){
+  sourcefile <- file.path(dir, 'DA', paste0(name,'_dars_df.rds'))
+  rds <- readRDS(sourcefile)
+  #get human up peaks
+  #remove peaks that don't have a correpsonding peak in human
+  DA_human <- filter(as.data.frame(rds$human), grepl("Hu",orig_name))
+  modified_list <- unlist(lapply(DA_human$orig_name, function(x) strsplit(x, ";")[[1]]))
+  DA_human$orig_name <- modified_list[grepl("Hu", modified_list)]
+  #subset to human up peaks
+  DA_human <- filter(DA_human, logFC > 0)
+  #get all peaks w human orig names
+  DA_others <- filter(rbind(as.data.frame(rds$human),as.data.frame(rds$chimp),as.data.frame(rds$rhesus)), grepl("Hu",orig_name))
+  modified_list <- unlist(lapply(DA_others$orig_name, function(x) strsplit(x, ";")[[1]]))
+  DA_others$orig_name <- modified_list[grepl("Hu", modified_list)]
+  #remove intersection w human specific up
+  DA_others <- filter(DA_others, orig_name %in% setdiff(DA_others$orig_name, DA_human$orig_name))
+  sourcefile <- file.path(dir, 'DA/peaks.rds')
+  rds <- readRDS(sourcefile)
+  ref <-  as.data.frame(rds$human)
+  ref$scenicplus_name <- paste0(ref$seqnames,':', ref$start,'-',ref$end)
+  DA_human <- filter(ref, name %in% DA_human$orig_name)
+  DA_others <- filter(ref, name %in% DA_others$orig_name)
+  df$HS = 0 
+  df$otherDE = 0 
+  df[[paste0(species, name,'p.value')]] = 1
+  for (gene in df$gene) {
+    grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+    grn_name <- grep("\\+", grn_name, value = TRUE)
+    df[gene,'HS'] <- length(intersect(DA_human$scenicplus_name, hgrn[[grn_name]]))
+    df[gene,'otherDA'] <- length(intersect(DA_others$scenicplus_name, hgrn[[grn_name]]))
+    df[gene,paste0(species,'.targets.region')] <- length(hgrn[[grn_name]])
+    df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.region')]*100
+    df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDA']),
+                                                                  c(length(DA_human$scenicplus_name) - df[gene,'HS']
+                                                                    ,length(DA_others$scenicplus_name) - df[gene,'otherDA'])),
+                                                            alternative="greater")$p.value
+   }
+ }
+
+#intersect with chimp
+#load DA peaks
+species='chimp'
+df <- filter(df, gene %in% rownames(cGRNs))
+dir = '~/Desktop/Sara/Dev'
+setwd(dir)
+for (name in c('vMB_progenitors','DA_STN_neurons_immature','DA_neurons')){
+  sourcefile <- file.path(dir, 'DA', paste0(name,'_dars_df.rds'))
+  rds <- readRDS(sourcefile)
+  DA_chimp <- filter(as.data.frame(rds$chimp), grepl("Ch",orig_name))
+  modified_list <- unlist(lapply(DA_chimp$orig_name, function(x) strsplit(x, ";")[[1]]))
+  DA_chimp$orig_name <- modified_list[grepl("Ch", modified_list)]
+  DA_chimp <- filter(DA_chimp, logFC > 0)
+  #get all peaks w human orig names
+  DA_others <- filter(rbind(as.data.frame(rds$human),as.data.frame(rds$chimp),as.data.frame(rds$rhesus)), grepl("Ch",orig_name))
+  modified_list <- unlist(lapply(DA_others$orig_name, function(x) strsplit(x, ";")[[1]]))
+  DA_others$orig_name <- modified_list[grepl("Ch", modified_list)]
+  #remove intersection w human specific up
+  DA_others <- filter(DA_others, orig_name %in% setdiff(DA_others$orig_name, DA_chimp$orig_name))
+  sourcefile <- file.path(dir, 'DA/peaks.rds')
+  rds <- readRDS(sourcefile)
+  ref <-  as.data.frame(rds$chimp)
+  ref$scenicplus_name <- paste0(ref$seqnames,':', ref$start,'-',ref$end)
+  DA_chimp <- filter(ref, name %in% DA_chimp$orig_name)
+  DA_others <- filter(ref, name %in% DA_others$orig_name)
+  df$HS = 0 
+  df$otherDE = 0 
+  df[[paste0(species, name,'p.value')]] = 1
+  for (gene in df$gene) {
+    grn_name <- names(cgrn)[grep(paste(gene,'_',sep=''),names(cgrn))]
+    grn_name <- grep("\\+", grn_name, value = TRUE)
+    df[gene,'HS'] <- length(intersect(DA_chimp$scenicplus_name, cgrn[[grn_name]]))
+    df[gene,'otherDA'] <- length(intersect(DA_others$scenicplus_name, cgrn[[grn_name]]))
+    df[gene,paste0(species,'.targets.region')] <- length(cgrn[[grn_name]])
+    df[gene, paste0(species, name,'overlap')] <- df[gene,'HS']/df[gene,paste0(species,'.targets.region')]*100
+    df[gene, paste0(species, name,'p.value')] <- fisher.test(rbind(c(df[gene,'HS'] , df[gene,'otherDA']),
+                                                                  c(length(DA_chimp$scenicplus_name) - df[gene,'HS'],
+                                                                    length(DA_others$scenicplus_name) - df[gene,'otherDA'] )),
+                                                            alternative="greater")$p.value
+ }
+}
+
+chimp <-  union(union(rownames(filter(df, , df$chimpDA_STN_neurons_immaturep.value < 0.05)),
+                rownames(filter(df, , df$chimpDA_neuronsp.value < 0.05))),
+                rownames(filter(df, , df$chimpvMB_progenitorsp.value < 0.05)))
+human <-  union(union(rownames(filter(df, , df$humanDA_STN_neurons_immaturep.value < 0.05)),
+                rownames(filter(df, , df$humanDA_neuronsp.value < 0.05))),
+                rownames(filter(df, , df$humanvMB_progenitorsp.value < 0.05)))
+
+
+df$p.significance <- c()
+for (gene in df$gene) {
+  if (gene %in% intersect(chimp,human)){
+    df[gene, 'p.significance'] <- 'Human, Chimp' 
+  } else if (gene %in% human) {
+    df[gene, 'p.significance'] <- 'Human' 
+  } else if (gene %in% chimp) {
+    df[gene, 'p.significance'] <- 'Chimp' 
+  } else {
+    df[gene, 'p.significance'] <- 'ns'
+  }
+}
+
+#A: targets that are human-specific DE genes
+#B: targets that are not human-specific DE (human-chimp DEGs that are in other categories)
+#C: nontargets that are human-specific DE genes
+#D : nontargets that are not human-specific DE (human-chimp DEGs that are in other categories)
+```
+
+
+
+
+```{r}
+df <- data.frame(coex_umap)
+df <- df[order(df$perc.human.specific),]
+df$Ranking <- c(1:dim(df)[1])
+p <- ggscatter(df, x = "Ranking", y = "perc.human.specific",ylab='%human.specific.in.targets',
+   color = "black", shape = 21, size = 2, # Points color, shape and size
+   font.label = c(7, "plain","#FC4E07") ,
+   label = 'gene',parse=TRUE,
+   label.select= tail(df$gene,n=10), #label top10 TFs in each cell type
+   repel = TRUE, label.rectangle = TRUE) + 
+    ggtitle('% targets in human specific genes of DA lineage')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8))
+  
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-humanspecific-humandev.pdf',sep=''),width=3.5, height=3.5)
+print(p)
+dev.off()
+```
+
+
+```{r}
+#df <- data.frame(coex_umap)
+p1 <- ggscatter(df, x = "perc.human.specific", y = "perc.chimp.specific",
+   color = "p.significance",palette = c('#3957A6',"#F4A339", "#FC4E07","darkgrey") , size = 2, #shape = 21,  Points color, shape and size
+   add = "reg.line",  # Add regressin line
+   add.params = list(color = "darkgrey", fill = "lightgray"), # Customize reg. line
+   conf.int = TRUE, # Add confidence interval
+   cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+   cor.coeff.args = list(method = "pearson",  label.sep = "\n"),
+   font.label = c(7, "plain","#FC4E07") , cor.coef.size = 3,
+   label = 'gene',label.select= c(tail(df[order(df$perc.human.specific),]$gene,n=3), tail(df[order(df$perc.chimp.specific),]$gene,n=3),human,chimp), 
+   #label top TFs in human and chimp in each cell type
+   repel = TRUE, label.rectangle = TRUE)     + 
+    ggtitle('%Species-specific DA Genes in Targets')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8)) #+
+    #theme_prism(base_fontface = "plain", base_line_size = 0.7, base_family = "Arial") 
+  
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-speciesspecific-dev.pdf',sep=''),width=3, height=3.2)
+print(p1)
+dev.off()
+```
+
+
+```{r}
+#df <- data.frame(coex_umap)
+df <- df[order(df$perc.overlap.target),]
+df$Ranking <- c(1:dim(df)[1])
+p2 <- ggscatter(df, x = "Ranking", y = "perc.overlap.target",
+   color = "p.significance",palette = c('#3957A6',"#F4A339", "#FC4E07","darkgrey") , size = 2, # Points color, shape and size
+   font.label = c(7, "plain","#FC4E07") ,
+   label = 'gene',parse=TRUE,
+   label.select= c(#tail(df$gene,n=2),#head(df$gene,n=2), 
+                   #tail(df[order(df$perc.human.specific),]$gene,n=5), 
+                   #tail(df[order(df$perc.chimp.specific),]$gene,n=5), 
+                   human,chimp), #label top2 TFs in each cell type
+   repel = TRUE, label.rectangle = TRUE) + 
+   ggtitle('#Species Shared Target')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8)) #+
+    #theme_prism(base_fontface = "plain", base_line_size = 0.7, base_family = "Arial") 
+  
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-overlaptarget-dev.pdf',sep=''),width=3, height=3.2)
+print(p2)
+dev.off()
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'fig6D.pdf',sep=''),width=7, height=3.8)
+print(ggarrange(p1,p2, ncol = 2, nrow = 1))
+dev.off()
+```
+
+```{r}
+library(ComplexHeatmap)
+library(dplyr)
+library(colorRamp2)
+col_fun_a = colorRamp2(c(0, 20), c("white", "#F4A339"))
+col_fun_b = colorRamp2(c(0, 20), c("white", "#3957A6"))
+
+df <- df[union(human,chimp),]
+heatmap_df <- df %>%
+  select('humanvMB_progenitors_polarize_summaryoverlap',
+         'humanDA_STN_neurons_immature_polarize_summaryoverlap',
+         'humanDA_neurons_polarize_summaryoverlap', 
+        )
+pvalue_df <- df %>%
+  select('humanvMB_progenitors_polarize_summaryp.value',
+         'humanDA_STN_neurons_immature_polarize_summaryp.value',
+         'humanDA_neurons_polarize_summaryp.value', 
+        )
+colnames(heatmap_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+colnames(pvalue_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht1 = Heatmap(heatmap_df,name = "Perc.Target.Human", col = col_fun_a,  #column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Human",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+heatmap_df <- df %>%
+  select('chimpvMB_progenitors_polarize_summaryoverlap',
+         'chimpDA_STN_neurons_immature_polarize_summaryoverlap', 
+         'chimpDA_neurons_polarize_summaryoverlap')
+pvalue_df <- df %>%
+  select('chimpvMB_progenitors_polarize_summaryp.value',
+         'chimpDA_STN_neurons_immature_polarize_summaryp.value', 
+         'chimpDA_neurons_polarize_summaryp.value')
+colnames(heatmap_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+colnames(pvalue_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht2 = Heatmap(heatmap_df,name = "Perc.Target.Chimp", col = col_fun_b, # column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Chimp",
+              border_gp = gpar(col = "black", lty = 2),cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'fig6D.perc.pdf',sep=''),width=3.5, height=5)
+print(ht1 + ht2)
+dev.off()
+
+```
+
+
+```{r}
+library(ComplexHeatmap)
+library(dplyr)
+library(colorRamp2)
+col_fun_a = colorRamp2(c(0, 8), c("white", "#F4A339"))
+col_fun_b = colorRamp2(c(0, 8), c("white", "#3957A6"))
+
+df <- df[union(human,chimp),]
+heatmap_df <- df %>%
+  dplyr::select('humanvMB_progenitorsoverlap',
+         'humanDA_STN_neurons_immatureoverlap',
+         'humanDA_neuronsoverlap', 
+        )
+pvalue_df <- df %>%
+  dplyr::select('humanvMB_progenitorsp.value',
+         'humanDA_STN_neurons_immaturep.value',
+         'humanDA_neuronsp.value', 
+        )
+colnames(heatmap_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+colnames(pvalue_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht1 = Heatmap(heatmap_df,name = "Perc.Target.Human", col = col_fun_a,  #column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Human",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+heatmap_df <- df %>%
+  dplyr::select('chimpvMB_progenitorsoverlap',
+         'chimpDA_STN_neurons_immatureoverlap', 
+         'chimpDA_neuronsoverlap')
+pvalue_df <- df %>%
+  dplyr::select('chimpvMB_progenitorsp.value',
+         'chimpDA_STN_neurons_immaturep.value', 
+         'chimpDA_neuronsp.value')
+colnames(heatmap_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+colnames(pvalue_df) <- c("vMB_progenitors", "DA_STN_neurons_immature","DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht2 = Heatmap(heatmap_df,name = "Perc.Target.Chimp", col = col_fun_b, # column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Chimp",
+              border_gp = gpar(col = "black", lty = 2),cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'supp.fig6D.pdf',sep=''),width=3.5, height=5.5)
+print(ht1 + ht2)
+dev.off()
+
+```
+
+
+
+```{r heatmap supp fig6D-DA}
+library(ComplexHeatmap)
+library(dplyr)
+library(colorRamp2)
+col_fun_a = colorRamp2(c(0, 5), c("white", "#F4A339"))
+col_fun_b = colorRamp2(c(0, 5), c("white", "#3957A6"))
+
+df <- df[union(human,chimp),]
+heatmap_df <- df %>%
+  dplyr::select('humanDA_neuronsoverlap')
+pvalue_df <- df %>%
+  dplyr::select('humanDA_neuronsp.value')
+colnames(heatmap_df) <- c("DA_neurons")
+colnames(pvalue_df) <- c("DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht1 = Heatmap(heatmap_df,name = "Perc.Target.Human", col = col_fun_a,  #column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Human",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+heatmap_df <- df %>%
+  dplyr::select('chimpDA_neuronsoverlap')
+pvalue_df <- df %>%
+  dplyr::select('chimpDA_neuronsp.value')
+colnames(heatmap_df) <- c("DA_neurons")
+colnames(pvalue_df) <- c("DA_neurons")
+#heatmap_df = data.matrix(-log(heatmap_df))
+ht2 = Heatmap(heatmap_df,name = "Perc.Target.Chimp", col = col_fun_b, # column_names_rot = 45,
+              cluster_rows = FALSE,cluster_columns = FALSE, column_title = "Chimp",
+              border_gp = gpar(col = "black", lty = 2),cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j] < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'supp.fig6D.pdf',sep=''),width=3.2, height=3)
+print(ht1 + ht2)
+dev.off()
+```
+
+
+```{r}
+df <- data.frame(coex_umap)
+p <- ggscatter(df, x = "human.targets.gene", y = "chimp.targets.gene",
+   color = "black", shape = 21, size = 2, # Points color, shape and size
+   add = "reg.line",  # Add regressin line
+   add.params = list(color = "darkgrey", fill = "lightgray"), # Customize reg. line
+   conf.int = TRUE, # Add confidence interval
+   cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+   cor.coeff.args = list(method = "pearson",  label.sep = "\n"),
+   font.label = c(7, "plain","#FC4E07") , cor.coef.size = 3,
+   #label = 'gene',label.select= c(tail(df[order(df$targets),]$gene,n=8), tail(df[order(df$chimp.targets),]$gene,n=8)), 
+   #label top TFs in human and chimp in each cell type
+   repel = TRUE, label.rectangle = TRUE)     + 
+    ggtitle('#GRN Target Genes')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8)) #+
+    #theme_prism(base_fontface = "plain", base_line_size = 0.7, base_family = "Arial") 
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-targetgene-dev.pdf',sep=''),width=2.5, height=2.5)
+print(p)
+dev.off()
+
+p <- ggscatter(df, x = "human.targets.region", y = "chimp.targets.region",
+   color = "black", shape = 21, size = 2, # Points color, shape and size
+   add = "reg.line",  # Add regressin line
+   add.params = list(color = "darkgrey", fill = "lightgray"), # Customize reg. line
+   conf.int = TRUE, # Add confidence interval
+   cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+   cor.coeff.args = list(method = "pearson",  label.sep = "\n"),
+   font.label = c(7, "plain","#FC4E07") , cor.coef.size = 3,
+   #label = 'gene',label.select= c(tail(df[order(df$targets),]$gene,n=8), tail(df[order(df$chimp.targets),]$gene,n=8)), 
+   #label top TFs in human and chimp in each cell type
+   repel = TRUE, label.rectangle = TRUE)     + 
+    ggtitle('#GRN Target Regions')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8)) #+
+    #theme_prism(base_fontface = "plain", base_line_size = 0.7, base_family = "Arial") 
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-targetregion-dev.pdf',sep=''),width=2.5, height=2.5)
+print(p)
+dev.off()
+```
+
+
+```{r}
+library(ggraph)
+
+edge_width = 0.2
+edge_color = c('-1'='darkgrey', '1'='orange')
+node_color = pals::magma(100)
+node_size = c(1,5)
+text_size = 10
+color_nodes = TRUE
+label_nodes = TRUE
+color_edges = FALSE
+
+p <- ggraph(gene_graph, x=UMAP_1, y=UMAP_2)
+
+#edge width = importance_x_abs_rho
+if (color_edges){
+  p <- p + geom_edge_diagonal(aes(color=factor(dir), width=importance_x_abs_rho)) +
+        scale_edge_width(range = c(0.2, 1)) +
+        scale_edge_color_manual(values=edge_color)
+  } else {
+  p <- p + geom_edge_diagonal(width=edge_width, color=edge_color[1])
+  }
+
+if (color_nodes){
+  p <- p + geom_node_point(aes(fill=perc.rot.up, size=log.targets), color='darkgrey', shape=21) +
+    scale_fill_gradientn(colors=node_color)
+  } else {
+    p <- p + geom_node_point(
+      color='darkgrey', shape=21, fill='lightgrey', size=node_size[1], stroke=0.5
+        )
+    }
+
+if (label_nodes){
+        p <- p + geom_node_text(
+            aes(label = name),
+            repel=T, size=text_size/ggplot2::.pt, max.overlaps=99999
+        )
+}
+
+    
+p <- p + scale_size_continuous(range=node_size) +
+        theme_void() #+ no_legend()
+
+fig_dir='~/Desktop/Sara/rot/figures/'
+pdf(paste(fig_dir, 'TF-umap-rotup.pdf',sep=''),width=4, height=6)
+print(p)
+dev.off()
+```
+
+
+```{r}
+df <- data.frame(coex_umap)
+p <- ggscatter(df, x = "perc.rot.up", y = "perc.rot.down",
+   color = "black", shape = 21, size = 2, # Points color, shape and size
+   add = "reg.line",  # Add regressin line
+   add.params = list(color = "darkgrey", fill = "lightgray"), # Customize reg. line
+   conf.int = TRUE, # Add confidence interval
+   cor.coef = TRUE, # Add correlation coefficient. see ?stat_cor
+   cor.coeff.args = list(method = "pearson",  label.sep = "\n", label.x = 30),
+   font.label = c(7, "plain","#FC4E07") , cor.coef.size = 3,
+   label = 'gene',label.select= c(tail(df[order(df$perc.rot.up),]$gene,n=4), tail(df[order(df$perc.rot.down),]$gene,n=4)), 
+   #label top TFs in human and chimp in each cell type
+   repel = TRUE, label.rectangle = TRUE)     + 
+    ggtitle('%Perc Rotenone Responsive Genes')  + theme(plot.title = element_text(size = 9)) + theme(text=element_text(size=8)) #+
+    #theme_prism(base_fontface = "plain", base_line_size = 0.7, base_family = "Arial") 
+  
+fig_dir='~/Desktop/Sara/rot/figures/'
+pdf(paste(fig_dir, 'TF-perc.rot.pdf',sep=''),width=3, height=3)
+print(p)
+dev.off()
+```
+
+
+
+```{r Fishers exact test for gene overlap rot}
+dir = '~/Desktop/Sara/rot'
+coex_umap <- as_tibble(read.csv(file.path(dir, 'coex_umap.csv')))
+
+df <- as.data.frame(coex_umap)
+rownames(df) <- df$gene
+df <- df[intersect(rownames(hGRNs),rownames(cGRNs)),]
+
+dir = '~/Desktop/Sara/rot/DE'
+species='human'
+df$down = 0 
+df[[paste0(species,'p.value')]] = 1
+#rot upregulated genes
+upDEGs <- list()
+downDEGs <- list()
+for (x in list.files(dir,pattern = paste0("rotenone_",species,"_cond"))) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  upDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC > 0 )$ID
+  downDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC < 0 )$ID
+}
+upDEGs$intersect <- intersect(upDEGs[[names(upDEGs)[1]]], upDEGs[[names(upDEGs)[2]]])
+downDEGs$intersect <- intersect(downDEGs[[names(downDEGs)[1]]], downDEGs[[names(downDEGs)[2]]])
+print(length(upDEGs$intersect))
+print(length(downDEGs$intersect))
+
+for (gene in df$gene) {
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  df[gene, paste0(species,'rot.up')] <- length(intersect(upDEGs$intersect, hgrn[[grn_name]]))
+  df[gene, paste0(species,'rot.down')] <- length(intersect(downDEGs$intersect, hgrn[[grn_name]]))
+  df[gene, paste0(species, '.up.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$intersect) - df[gene,'up'] ,length(downDEGs$intersect) - df[gene,'down'])), alternative="greater")$p.value
+  df[gene, paste0(species, '.down.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$intersect) - df[gene,paste0(species,'rot.up')] ,length(downDEGs$intersect) - df[gene,paste0(species,'rot.down')])), alternative="less")$p.value
+}
+
+
+species='chimp'
+df$down = 0 
+df[[paste0(species,'p.value')]] = 1
+#rot upregulated genes
+upDEGs <- list()
+downDEGs <- list()
+for (x in list.files(dir,pattern = paste0("rotenone_",species,"_cond"))) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  upDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC > 0 )$ID
+  downDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC < 0 )$ID
+}
+upDEGs$intersect <- intersect(upDEGs[[names(upDEGs)[1]]], upDEGs[[names(upDEGs)[2]]])
+downDEGs$intersect <- intersect(downDEGs[[names(downDEGs)[1]]], downDEGs[[names(downDEGs)[2]]])
+print(length(upDEGs$intersect))
+print(length(downDEGs$intersect))
+for (gene in df$gene) {
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  df[gene, paste0(species,'rot.up')] <- length(intersect(upDEGs$intersect, hgrn[[grn_name]]))
+  df[gene, paste0(species,'rot.down')] <- length(intersect(downDEGs$intersect, hgrn[[grn_name]]))
+  df[gene, paste0(species, '.up.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$intersect) - df[gene,'up'] ,length(downDEGs$intersect) - df[gene,'down'])), alternative="greater")$p.value
+  df[gene, paste0(species, '.down.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$intersect) - df[gene,paste0(species,'rot.up')] ,length(downDEGs$intersect) - df[gene,paste0(species,'rot.down')])), alternative="less")$p.value
+}
+
+df$chimp.targets <- cGRNs[df$gene , ]$genes
+df$perc.human.rot.up <- df$humanrot.up/df$human.targets*100
+df$perc.human.rot.down <- df$humanrot.down/df$human.targets*100
+df$perc.chimp.rot.up <- df$chimprot.up/df$chimp.targets*100
+df$perc.chimp.rot.down <- df$chimprot.down/df$chimp.targets*100
+
+#human <-  union(rownames(filter(df, , df$human.down.p.value < 0.05)),
+#                      rownames(filter(df, , df$human.up.p.value < 0.05)))
+#df <- filter(df, gene %in% human)
+```
+
+
+```{r}
+library(ComplexHeatmap)
+library(dplyr)
+library(colorRamp2)
+col_fun_a = colorRamp2(c(0, 60), c("white", "#F4A339"))
+col_fun_b = colorRamp2(c(0, 60), c("white", "#3957A6"))
+
+heatmap_df <- data.matrix(df %>% dplyr::select( 'perc.human.rot.up','perc.human.rot.down'))
+pvalue_df <- data.matrix(df %>% dplyr::select( 'human.up.p.value','human.down.p.value'))
+colnames(heatmap_df) <- c("rot_up", "rot_down")
+colnames(pvalue_df) <- c("rot_up", "rot_down")
+ht1 = Heatmap(heatmap_df,name = "Perc.Target.Human", col = col_fun_a, column_names_rot = 45,
+              cluster_rows = TRUE,cluster_columns = FALSE, column_title = "Human",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j]  < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+heatmap_df <- data.matrix(df %>% dplyr::select( 'perc.chimp.rot.up','perc.chimp.rot.down'))
+pvalue_df <- data.matrix(df %>% dplyr::select( 'chimp.up.p.value','chimp.down.p.value'))
+colnames(heatmap_df) <- c("rot_up", "rot_down")
+colnames(pvalue_df) <- c("rot_up", "rot_down")
+ht2 = Heatmap(heatmap_df,name = "Perc.Target.Chimp", col = col_fun_b, column_names_rot = 45,
+              cluster_rows = TRUE,cluster_columns = FALSE, column_title = "Chimp",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j]  < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'fig7.heatmap.pdf',sep=''),width=4, height=4)
+print(ht1 + ht2)
+dev.off()
+```
+
+
+```{r fig7H}
+dir = '~/Desktop/Sara/rot'
+coex_umap <- as_tibble(read.csv(file.path(dir, 'coex_umap.csv')))
+
+df <- as.data.frame(coex_umap)
+rownames(df) <- df$gene
+
+dir = '~/Desktop/Sara/rot/DE'
+species='human'
+df$down = 0 
+df[[paste0(species,'p.value')]] = 1
+#rot upregulated genes
+upDEGs <- list()
+downDEGs <- list()
+for (x in list.files(dir,pattern = paste0("rotenone_",species,"_cond"))) {
+  name = gsub('.csv','',x)
+  if (file.size(file.path(dir,x)) == 0) next
+  upDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC > 0 )$ID
+  downDEGs[[name]] <- filter(read.csv(file.path(dir,x),header = TRUE), logFC < 0 )$ID
+}
+upDEGs$intersect <- intersect(upDEGs[[names(upDEGs)[1]]], upDEGs[[names(upDEGs)[2]]])
+downDEGs$intersect <- intersect(downDEGs[[names(downDEGs)[1]]], downDEGs[[names(downDEGs)[2]]])
+print(length(upDEGs$intersect))
+print(length(downDEGs$intersect))
+
+for (gene in df$gene) {
+  grn_name <- names(hgrn)[grep(paste(gene,'_',sep=''),names(hgrn))]
+  grn_name <- grep("\\+", grn_name, value = TRUE)
+  df[gene, paste0(species,'rot.up')] <- length(intersect(upDEGs$DA_neurons_de_genes_rotenone_human_cond24, hgrn[[grn_name]]))
+  df[gene, paste0(species,'rot.down')] <- length(intersect(downDEGs$DA_neurons_de_genes_rotenone_human_cond24, hgrn[[grn_name]]))
+  df[gene, paste0(species, '.up.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$DA_neurons_de_genes_rotenone_human_cond24) - df[gene,'up'] ,length(downDEGs$DA_neurons_de_genes_rotenone_human_cond24) - df[gene,'down'])), alternative="greater")$p.value
+  df[gene, paste0(species, '.down.p.value')] <- fisher.test(rbind(c(df[gene,paste0(species,'rot.up')] , df[gene,paste0(species,'rot.down')]),
+                                                      c(length(upDEGs$DA_neurons_de_genes_rotenone_human_cond24) - df[gene,paste0(species,'rot.up')] ,length(downDEGs$DA_neurons_de_genes_rotenone_human_cond24) - df[gene,paste0(species,'rot.down')])), alternative="less")$p.value
+}
+
+df$perc.human.rot.up <- df$humanrot.up/df$human.targets*100
+df$perc.human.rot.down <- df$humanrot.down/df$human.targets*100
+human <-  union(rownames(filter(df, , df$human.down.p.value < 0.05)),
+                      rownames(filter(df, , df$human.up.p.value < 0.05)))
+df <- filter(df, gene %in% human)
+
+
+library(ComplexHeatmap)
+library(dplyr)
+library(colorRamp2)
+col_fun_a = colorRamp2(c(0, 60), c("white", "#F4A339"))
+
+heatmap_df <- data.matrix(df %>% dplyr::select( 'perc.human.rot.up','perc.human.rot.down'))
+pvalue_df <- data.matrix(df %>% dplyr::select( 'human.up.p.value','human.down.p.value'))
+colnames(heatmap_df) <- c("rot_up", "rot_down")
+colnames(pvalue_df) <- c("rot_up", "rot_down")
+ht1 = Heatmap(heatmap_df,name = "Perc.Target.Human", col = col_fun_a, column_names_rot = 45,
+              cluster_rows = TRUE,cluster_columns = FALSE, column_title = "Human",
+              border_gp = gpar(col = "black", lty = 2), cell_fun = function(j, i, x, y, w, h, fill) {
+    if(pvalue_df[i, j]  < 0.001) {
+        grid.text("***", x, y)
+    } else if(pvalue_df[i, j] < 0.01) {
+        grid.text("**", x, y)
+    } else if(pvalue_df[i, j] < 0.05) {
+        grid.text("*", x, y)
+    }
+})
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'fig7H_24hr.pdf',sep=''),width=3.5, height=3.5)
+print(ht1)
+dev.off()
+
+```
+
+
+
+
+```{r calculate GRN umap, adapted from pando}
+set.seed(123)
+library(umap)
+library(Matrix)
+library(tidyr)
+library(dplyr)
+
+tfs = c('PBX1','POU3F2','SOX4')
+features <- c(tfs,intersect(DEGs, union(union(grn$`SOX4_+_54g`,grn$`PBX1_+_92g`),grn$`POU3F2_+_118g`)))
+
+
+rna_expr <- t(LayerData(ad, assay='originalexp', layer='scale.data'))
+features <- intersect(features, colnames(rna_expr))
+
+rna_expr <- rna_expr[, features]
+gene_cor <- sparse_cor(rna_expr)
+
+
+gene_cor_df <- gene_cor %>%
+  as_tibble(rownames='source') %>%
+  pivot_longer(!source, names_to='target', values_to='corr')
+
+
+modules_use <- modules %>%
+  filter(target%in%colnames(rna_expr), TF%in%colnames(rna_expr))
+
+
+gene_net <- modules_use %>%
+  dplyr::select(TF, target, everything()) %>%
+  dplyr::group_by(target) %>%
+  dplyr::left_join(gene_cor_df, by=c('TF'='source', 'target'='target')) %>%
+  {.$corr[is.na(.$corr)] <- 0; .}
+
+#use importance_x_rho as coefficient
+reg_mat <- gene_net %>%
+  dplyr::select(target, TF, importance_x_rho) %>%
+  tidyr::pivot_wider(names_from=TF, values_from=importance_x_rho, values_fill=0) %>%
+  tibble::column_to_rownames('target') %>% as.matrix()
+
+
+#log_message('Computing weighted regulatory factor', verbose=verbose)
+# Layout with UMAP on adjacency matrix
+reg_factor_mat <- abs(reg_mat) + 1
+coex_mat <- gene_cor[rownames(reg_factor_mat), colnames(reg_factor_mat)] * sqrt(reg_factor_mat)
+
+
+#log_message('Computing UMAP embedding', verbose=verbose)
+coex_umap <- umap(as.matrix(coex_mat), n_neighbors = 15)$layout %>%
+        {colnames(.) <- c('UMAP_1', 'UMAP_2'); .} %>%
+        as_tibble(rownames='gene')
+
+#add number of target genes
+coex_umap$targets <- GRNs[coex_umap$gene , ]$genes
+coex_umap <- coex_umap %>% mutate(targets = coalesce(targets, 0))
+coex_umap$log.targets <- log(coex_umap$targets + 1)
+
+
+
+library(tidygraph)
+gene_graph <- as_tbl_graph(gene_net) %>%
+  activate(edges) %>%
+  mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+  mutate(dir=sign(importance_x_rho)) %>%
+  activate(nodes) %>%
+  mutate(centrality=centrality_pagerank()) %>%
+  inner_join(coex_umap, by=c('name'='gene')) 
+
+```
+
+
+
+```{r plot TF network}
+tf = 'PBX1'
+order = 3
+keep_all_edges = TRUE
+parallel=TRUE
+
+gene_graph_nodes <- gene_graph %N>% as_tibble()
+
+features <-  gene_graph_nodes$name
+
+#log_message('Getting shortest paths from TF', verbose=verbose)
+spaths <- igraph::all_shortest_paths(gene_graph, tf, features, mode='out')$res
+
+if (length(spaths) < 3){
+  stop("Selected TF has fewer than 3 targets.")
+  }
+
+spath_list <- map_par(spaths, function(p){
+  edg <- names(p)
+  edg_graph <- gene_graph %>%
+    filter(name%in%edg) %>%
+    convert(to_shortest_path, from=which(.N()$name==edg[1]), to=which(.N()$name==edg[length(edg)])) %E>%
+    mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+    as_tibble()
+  edg_dir <- edg_graph %>% pull(importance_x_rho) %>% sign() %>% prod()
+  edg_est <- edg_graph %>% pull(importance_x_rho) %>% mean()
+  path_df <- tibble(
+    start_node = edg[1],
+    end_node = edg[length(edg)],
+    dir = edg_dir,
+    path = paste(edg, collapse=';'), 
+    path_regions = paste(edg_graph$regions, collapse=';'),
+    order = length(edg)-1,
+    mean_estimate = edg_est
+    )
+  if ('padj' %in% colnames(edg_graph)){
+    path_df$mean_log_padj <- edg_graph %>% pull(padj) %>% {-log10(.)} %>% mean()
+    }
+  return(
+    list(
+      path = path_df,
+      graph = mutate(
+      edg_graph,
+      path=paste(edg, collapse=';'),
+      end_node=edg[length(edg)],
+      comb_dir=edg_dir
+      )
+      )
+    )
+    }, parallel=parallel)
+  
+
+#log_message('Pruning graph', verbose=verbose)
+spath_dir <- purrr::map_dfr(spath_list, function(x) x$path) %>%
+  mutate(
+    path_genes=stringr::str_split(path, ';'),
+    path_regions=stringr::str_split(path_regions, ';')
+    )
+spath_graph <- purrr::map_dfr(spath_list, function(x) x$graph)
+
+grn_pruned <- spath_dir %>%
+  select(start_node, end_node, everything()) %>%
+  group_by(end_node) %>% filter(order<=order)
+
+if (!keep_all_edges){
+  if ('padj' %in% colnames(grn_pruned)){
+    grn_pruned <- filter(grn_pruned, order==1 | mean_padj==max(mean_padj))
+    } else {
+      grn_pruned <- filter(grn_pruned, order==1 | mean_estimate==max(mean_estimate))
+    }
+  }
+
+spath_graph_pruned <- spath_graph %>%
+  filter(path%in%grn_pruned$path) %>%
+  select(from_node, to_node, end_node, comb_dir) %>% distinct()
+
+grn_graph_pruned <- gene_graph %E>%
+  mutate(from_node=.N()$name[from], to_node=.N()$name[to]) %>%
+  as_tibble() %>% distinct()
+
+grn_graph_pruned <- suppressMessages(inner_join(grn_graph_pruned, spath_graph_pruned)) %>%
+  select(from_node, to_node, everything(), -from, -to) %>%
+  arrange(comb_dir) %>% as_tbl_graph()
+
+```
+
+
+```{r}
+circular = FALSE
+edge_width = 0.2
+edge_color = c('-1'='darkgrey', '1'='orange')
+node_size = 3
+text_size = 10
+label_nodes = 'tfs'
+#label_nodes = 'all'
+color_edges = TRUE
+highlight_features <- rownames(GRNs)
+
+library(ggraph)
+library(tidygraph)
+
+p <- ggraph(gene_graph, layout='tree', circular=circular)
+
+if (color_edges){
+  p <- p + geom_edge_diagonal(aes(color=factor(dir)), width=edge_width) +
+    scale_edge_color_manual(values=edge_color)
+  } else {
+    p <- p + geom_edge_diagonal(width=edge_width, color=edge_color[1])
+    }
+
+p <- p + geom_node_point(
+  color='darkgrey', shape=21, fill='lightgrey', size=node_size, stroke=0.5
+  )
+
+net_tfs <- highlight_features
+if (label_nodes=='tfs'){
+  p <- p + geom_node_label(
+    aes(label=name, filter=name%in%net_tfs),
+    size=text_size/ggplot2::.pt,
+    label.padding=unit(0.1, 'line')
+    )
+  } else if (label_nodes=='all'){
+    p <- p + geom_node_label(
+      aes(label=name),
+      size=text_size/ggplot2::.pt,
+      label.padding=unit(0.1, 'line')
+      )
+    } else {
+      p <- p + geom_node_label(
+      aes(label=name, filter=name==tf),
+      size=text_size/ggplot2::.pt,
+      label.padding=unit(0.1, 'line')
+      )
+    }
+
+p <- p + scale_size_continuous(range=node_size) +
+  theme_void() #+ no_legend()
+
+p
+```
+
+```{r}
+# Load package after installation
+library(BioNERO)
+set.seed(123)
+
+d1 <- data.frame(x = 'SOX4', y = grn$`SOX4_+_54g`)
+d2 <- data.frame(x = 'PBX1', y = grn$`PBX1_+_92g`)
+d3 <- data.frame(x = 'POU3F2', y = grn$`POU3F2_+_118g`)
+
+grns <- rbind(d1,d2,d3)
+names(grns) <- c('Regulator', 'Target')
+grns <- filter(grns, Target%in%DEGs)
+
+plot_grn(grns,top_n_hubs = 10,show_labels = "tophubs",)
+
+```
+
+```{r}
+# Load package after installation
+library(BioNERO)
+set.seed(123)
+
+d1 <- data.frame(x = 'BACH2', y = grn$`BACH2_+_454g`)
+d2 <- data.frame(x = 'CREB5', y = grn$`CREB5_+_99g`)
+d3 <- data.frame(x = 'JUN', y = grn$`JUN_+_108g`)
+d4 <- data.frame(x = 'CREB3', y = grn$`CREB3_+_16g`)
+
+grns <- rbind(d1,d2,d3)
+names(grns) <- c('Regulator', 'Target')
+
+
+plot_grn(filter(grns, Target%in%DEGs),top_n_hubs = 10,show_labels = "tophubs",)
+```
+
+
+```{r}
+#species specific response genes
+dir = '~/Desktop/Sara/rot'
+TF2G <- read.csv(file.path(dir,'TF2G_adj_degs.human.csv'),header = TRUE,row.names = 1)
+#genes<- names(TF2G)
+TF2G <- as_tibble(TF2G)
+
+myplots <- list()
+for (gene in unique(TF2G$target)) {
+  df <- data.frame(filter(TF2G, target == gene))
+  df <- df[order(df$importance_x_abs_rho),]
+  df$Ranking <- c(1:dim(df)[1])
+  p <- ggscatter(df, x = "Ranking", y = "importance_x_abs_rho",ylab='TF importance',
+   color = "black", shape = 21, size = 2, # Points color, shape and size
+   font.label = c(7, "plain","#FC4E07") ,
+   label = 'TF',parse=TRUE,
+   label.select= tail(df$TF,n=4), #label top2 TFs in each cell type
+   repel = TRUE, label.rectangle = TRUE) + 
+    ggtitle(gene)  + theme(plot.title = element_text(size = 7.5)) + theme(text=element_text(size=8))
+  myplots[[gene]] <- p
+}
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'TF-importance_genes.pdf',sep=''),width=12, height=3)
+print(ggarrange(plotlist = myplots, ncol = 5, nrow = 1))
+dev.off()
+
+
+
+```
+
+
+
+```{r}
+#GO term enrichment
+set.seed(123)   
+library(richR) 
+library(ggpubr)
+hsago <- buildAnnot(species="human",keytype="SYMBOL",anntype = "GO")
+hsako <- buildAnnot(species = "human",keytype="SYMBOL", anntype = "KEGG")
+
+#human
+genes <- unique(c(hgrn$`ZFHX3_+_71g`,hgrn$`POU2F2_+_176g`,hgrn$`PBX1_+_542g`,hgrn$`UNCX_+_34g`,hgrn$`OTX2_+_100g`,hgrn$`FOXP1_+_116g`))
+resgo1 <- richGO(genes,godata = hsago,ontology ="BP")
+head(detail(resgo1))
+#resko <- richKEGG(genes,kodata = hsako)
+#head(detail(resko))
+
+p1 <- ggbar(resgo1,top = 8,usePadj = T)+ 
+        scale_fill_gradient("-log10(Padj)", low = "white", high = '#F4A339',limits=c(0,max(80))
+                            )+ggpubr::theme_classic2()+
+        scale_y_continuous(limits = c(0, 0.35))
+
+#chimp
+#genes <- cgrn$`ZFHX3_+_142g`
+genes <- unique(c(cgrn$`ZFHX3_+_142g`,cgrn$`POU2F2_+_201g`,cgrn$`PBX1_+_1281g`,cgrn$`UNCX_+_22g`,cgrn$`OTX2_+_97g`,cgrn$`FOXP1_+_38g`))
+resgo2 <- richGO(genes,godata = hsago,ontology ="BP")
+head(detail(resgo2))
+
+p2 <- ggbar(resgo2,top = 8,usePadj = T)+ 
+        scale_fill_gradient("-log10(Padj)", low = "white", high = '#3957A6',limits=c(0,max(80))
+                            )+ggpubr::theme_classic2()+
+        scale_y_continuous(limits = c(0, 0.35))
+
+fig_dir='~/Desktop/Sara/'
+pdf(paste(fig_dir, 'HuamnSpecificGRNs_GO.pdf',sep=''),width=13, height=2.5)
+print(p1+p2)
+dev.off()
+
+
+#human
+genes <- intersect(hgrn$`ZFHX3_+_71g`,hDEGs)
+resgo <- richGO(genes,godata = hsago,ontology ="BP")
+head(detail(resgo))
+resko <- richKEGG(genes,kodata = hsako)
+head(detail(resko))
+
+p1 <- ggbar(resgo,top = 8,usePadj = T)+ 
+        scale_fill_gradient("-log10(Padj)", low = "white", high = '#F4A339',limits=c(0,max(10))
+                            )+ggpubr::theme_classic2()+
+        scale_y_continuous(limits = c(0, 0.05))
+
+
+```
+

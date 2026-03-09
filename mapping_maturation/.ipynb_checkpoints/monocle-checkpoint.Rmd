@@ -1,0 +1,659 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(zellkonverter)
+library(monocle3)
+library(Seurat)
+library(SeuratWrappers)
+library(patchwork)
+library(dplyr)
+library(dittoSeq)
+library(cowplot)
+library(ggpubr)
+library(ggsci)
+set.seed(1234)
+```
+
+
+```{r}
+fig_dir = '~/Desktop/Sara/figures/' 
+
+
+sourcefile <- file.path('~/Desktop/Sara/DA.integrated.raw.h5ad')
+sourcefile <- file.path('~/Desktop/Sara/HvQvMall_ME.scvi.integrated.raw.small.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+vivo <- as.Seurat(ad, counts = "counts", data = "counts")
+vivo$source <- 'primary'
+vivo$source <- paste(vivo$source, vivo$batch,sep='_')
+
+sourcefile <- file.path('~/Desktop/Sara/20240313_GEX_D40-D100-D80.DA.h5ad')
+sourcefile <- file.path('~/Desktop/Sara/20240313_GEX_D40-D100-D80.small.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+organoids <- as.Seurat(ad, counts = "counts", data = "counts")
+organoids$source <- 'organoids'
+rm(ad)
+gc()
+
+sourcefile <- file.path('~/Desktop/Sara/20241011_GEX_D80_rot_challenge_rPCA_DA_subset.raw.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+ad <- as.Seurat(ad, counts = "counts", data = "counts")
+
+```
+
+```{r}
+fig_dir = '~/Desktop/Sara/figures/'
+
+sourcefile <- file.path('~/Desktop/Sara/HvQvMall_ME.scvi.integrated.raw.small.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+vivo <- as.Seurat(ad, counts = "counts", data = "counts")
+vivo$source <- 'primary'
+vivo$source <- paste(vivo$source, vivo$batch,sep='_')
+
+Merged_all <- subset(x = vivo, subset = species %in% c("human","macaque"))
+Merged_all$source_species <- paste(Merged_all$source, Merged_all$species,sep='_')
+Merged_all$supervised_name <- gsub(",", "", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub("/", "_", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub(" ", "_", Merged_all$supervised_name)
+Merged_all <- NormalizeData(Merged_all) 
+
+#add metadata(stage) for linnarsson data
+df <- read.csv('~/Desktop/Sara/linnarsson_S1.csv')
+df <- df %>%
+    mutate(timepoint = Age * 7) %>%
+    select(Donor, Week, Age, timepoint) %>%
+    distinct()
+Merged_all$donor_id <- gsub("^b'(.*)'$", "\\1", Merged_all$donor_id)
+Merged_all$cellname <- colnames(Merged_all)
+df <- merge(Merged_all@meta.data, df, by.x = "donor_id",
+            by.y = "Donor", all.x = TRUE, sort = FALSE) 
+df <- df %>%
+    mutate(timepoint = coalesce(timepoint.x, timepoint.y))
+rownames(df) <- df$cellname
+df <- df[colnames(Merged_all),]
+Merged_all$PCD <- df$timepoint
+Merged_all$timepoint <- df$timepoint
+Merged_all$PCW <- df$timepoint/7
+
+#rename cluster annotations
+Merged_all <- SetIdent(Merged_all, value = "supervised_name")
+Merged_all$supervised_name <- as.factor(Merged_all$supervised_name)
+Merged_all <- RenameIdents(object = Merged_all,  'FB_MB_glutamatergic_neurons_PITX2_SIM1' = 'FB_MB_glutamatergic_neurons', 
+                                    'Lateral_MB_progenitor' = 'Lateral_MB_progenitors', 
+                                    'MB_HB_glutamatergic_neurons_LMX1B_TFAP2B' = 'MB_HB_glutamatergic_neurons',
+                                    'MB_glutamatergic_neurons_high_TFAP2B' = 'MB_glutamatergic_neurons', 
+                                    'MB_HB_glutamatergic_neurons_FOXP2_LHX1_5' = 'MB_HB_glutamatergic_neurons',
+                                    'Glial_progenitors' = 'Glial_progenitors_astrocytes',
+                                    'Radial_glia_glial_progenitor' = 'Glial_progenitors_astrocytes'
+)
+Merged_all$supervised_name <- Merged_all@active.ident
+
+#reorder cell types to adjust for colors
+tab20_colors <- c(
+    "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c", "#98df8a", 
+    "#d62728", #"#ff9896",
+    "#9467bd", #"#c5b0d5", 
+    "#8c564b", "#c49c94", 
+    "#e377c2", "#f7b6d2", "#7f7f7f", "#c7c7c7", "#bcbd22", "#dbdb8d", 
+    "#17becf", "#9edae5"
+)
+colors <- c(tab20_colors, pal_d3("category20b")(14))
+celltype_order <- c("DA_neurons","DA_STN_neurons_immature","FB_progenitors","Glial_progenitors_astrocytes","Hypothalamic_neurons",
+                    "Lateral_MB_progenitors","Lateral_MB_progenitors_cycling", #"skip",
+                    "MB_GABAergic_neurons",#"skip",
+                    "MB_glutamatergic_neurons", "MB_HB_FP_cells","MB_HB_glutamatergic_neurons","MB_HB_glutamatergic_neurons_immature","MB_HB_neurons_LHX1+",
+                    "Oculomotor_neurons","Progenitors_cycling", "STN_neurons","Ventral_FB_MB_progenitors","Ventral_FB_MB_progenitors_cycling",
+                    #primary data
+                    "FB_MB_glutamatergic_neurons" ,"Lateral_MB_HB_progenitors" , "HB_glutamatergic_neurons" ,"Thalamic_progenitors",
+                    "FB_GABAergic_neurons" , "Thalamic_glutamatergic_neurons" ,"Lateral_MB_progenitors_neurogenesis" ,
+                    "FB_glutamatergic_neurons","Caudal_MB_progenitors" , "MB_HB_GABAergic_glycinergic_neurons_immature", "OPCs", 
+                    "MB_HB_GABAergic_glycinergic_neurons", "MB_dorsal_RP_progenitors" , "Low_quality_technical" )
+Merged_all$supervised_name <- factor(Merged_all$supervised_name, levels = celltype_order)
+
+#rename source for schmitz data
+Merged_all <- SetIdent(Merged_all, value = "source")
+Merged_all$source <- as.factor(Merged_all$source)
+Merged_all <- RenameIdents(object = Merged_all,  'primary_Schmitz' = 'primary_Eze')
+Merged_all$source <- Merged_all@active.ident
+
+Merged_all <- SetIdent(Merged_all, value = "supervised_name")
+Merged_all@reductions$UMAP <- Merged_all@reductions$X_umap
+Merged_all$timepoint <- ifelse(Merged_all$source == 'organoids', as.numeric(sub('^.', '', Merged_all$time_point)), Merged_all$timepoint)
+
+pdf(paste(fig_dir, 'umap_integration_primary_celltype.pdf',sep=''),width=12, height=4.5)
+dittoDimPlot(Merged_all,'supervised_name', theme=ggpubr::theme_classic2(),order = "randomize",color.panel = colors)+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_primary_species.pdf',sep=''),width=7, height=4.5)
+dittoDimPlot(Merged_all,'species', theme=ggpubr::theme_classic2(),order = "randomize",color.panel = c("#F4A339",'#7E2859'))+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_primary_timepoint_merged.pdf',sep=''),width=3.5, height=3)
+dittoDimPlot(Merged_all, 'timepoint', do.label = TRUE,order = "randomize", theme=ggpubr::theme_classic2())+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_primary_timepoint.pdf',sep=''),width=6, height=3)
+dittoDimPlot(Merged_all, 'timepoint', do.label = TRUE,order = "randomize",split.by = 'species', theme=ggpubr::theme_classic2())+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_primary_batch.pdf',sep=''),width=10, height=6)
+dittoDimPlot(Merged_all,'batch_name',order = "randomize", theme=ggpubr::theme_classic2(),color.panel = colors)+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_primary_donor.pdf',sep=''),width=12, height=6)
+dittoDimPlot(Merged_all,'donor_id',order = "randomize", theme=ggpubr::theme_classic2())+ NoAxes()+ggtitle('')
+dev.off()
+
+```
+
+
+```{r}
+####Merge by source and subset human
+Merged_all <- merge(vivo, organoids,  project = "Merged_all")
+Merged_all <- subset(x = Merged_all, subset = species == "human")
+Merged_all$source_species <- paste(Merged_all$source, Merged_all$species,sep='_')
+Merged_all$supervised_name <- gsub(",", "", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub("/", "_", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub(" ", "_", Merged_all$supervised_name)
+
+Merged_all.list <- SplitObject(Merged_all, split.by = "source_species")
+Merged_all.list <- lapply(X = Merged_all.list, FUN = function(x) {
+  x <- NormalizeData(x) 
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 1000)
+})
+
+features <- SelectIntegrationFeatures(object.list = Merged_all.list)
+Merged_all.list <- lapply(X = Merged_all.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+gc()
+
+Merged_all.anchors <- FindIntegrationAnchors(object.list = Merged_all.list, anchor.features = features, reduction = "rpca",k.anchor = 100)
+Merged_all.combined <- IntegrateData(anchorset = Merged_all.anchors) 
+
+DefaultAssay(Merged_all.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+Merged_all.combined <- ScaleData(Merged_all.combined, verbose = FALSE)
+Merged_all.combined <- RunPCA(Merged_all.combined, npcs = 50, verbose = FALSE)
+ElbowPlot(Merged_all.combined, ndims = 100)
+# UMAP
+#library(reticulate)
+#use_python(python = "~/opt/anaconda3/bin/python", required = TRUE)
+Merged_all.combined <- RunUMAP(Merged_all.combined, reduction = "pca", dims = 1:50)
+Merged_all.combined <- FindNeighbors(Merged_all.combined, reduction = "pca", dims = 1:30)
+Merged_all.combined <- FindClusters(Merged_all.combined, resolution = 0.5)
+
+saveRDS(Merged_all.combined, '~/Desktop/Sara/merged.human.rds')
+```
+
+```{r}
+Merged_all.combined <- readRDS('~/Desktop/Sara/merged.human.rds')
+
+#add metadata(stage) for linnarsson data
+df <- read.csv('~/Desktop/Sara/linnarsson_S1.csv')
+df <- df %>%
+  mutate(timepoint = Age * 7) %>%
+  select(Donor, Week, Age, timepoint) %>%
+  distinct()
+Merged_all.combined$donor_id <- gsub("^b'(.*)'$", "\\1", Merged_all.combined$donor_id)
+Merged_all.combined$cellname <- colnames(Merged_all.combined)
+df <- merge(Merged_all.combined@meta.data, df, by.x = "donor_id",
+      by.y = "Donor", all.x = TRUE, sort = FALSE) 
+df <- df %>%
+  mutate(timepoint = coalesce(timepoint.x, timepoint.y))
+rownames(df) <- df$cellname
+df <- df[colnames(Merged_all.combined),]
+Merged_all.combined$PCD <- df$timepoint
+Merged_all.combined$timepoint <- df$timepoint
+Merged_all.combined$PCW <- df$timepoint/7
+
+#rename cluster annotations
+Merged_all.combined <- SetIdent(Merged_all.combined, value = "supervised_name")
+Merged_all.combined$supervised_name <- as.factor(Merged_all.combined$supervised_name)
+Merged_all.combined <- RenameIdents(object = Merged_all.combined,  'FB_MB_glutamatergic_neurons_PITX2_SIM1' = 'FB_MB_glutamatergic_neurons', 
+                                    'Lateral_MB_progenitor' = 'Lateral_MB_progenitors', 
+'MB_HB_glutamatergic_neurons_LMX1B_TFAP2B' = 'MB_HB_glutamatergic_neurons',
+'MB_glutamatergic_neurons_high_TFAP2B' = 'MB_glutamatergic_neurons', 
+'MB_HB_glutamatergic_neurons_FOXP2_LHX1_5' = 'MB_HB_glutamatergic_neurons',
+'Glial_progenitors' = 'Glial_progenitors_astrocytes',
+'Radial_glia_glial_progenitor' = 'Glial_progenitors_astrocytes'
+)
+Merged_all.combined$supervised_name <- Merged_all.combined@active.ident
+
+#reorder cell types to adjust for colors
+tab20_colors <- c(
+  "#1f77b4", "#aec7e8", "#ff7f0e", "#ffbb78", "#2ca02c", "#98df8a", 
+  "#d62728", #"#ff9896",
+  "#9467bd", #"#c5b0d5", 
+  "#8c564b", "#c49c94", 
+  "#e377c2", "#f7b6d2", "#7f7f7f", "#c7c7c7", "#bcbd22", "#dbdb8d", 
+  "#17becf", "#9edae5"
+)
+colors <- c(tab20_colors, pal_d3("category20b")(14))
+celltype_order <- c("DA_neurons","DA_STN_neurons_immature","FB_progenitors","Glial_progenitors_astrocytes","Hypothalamic_neurons",
+                   "Lateral_MB_progenitors","Lateral_MB_progenitors_cycling", #"skip",
+                   "MB_GABAergic_neurons",#"skip",
+                   "MB_glutamatergic_neurons", "MB_HB_FP_cells","MB_HB_glutamatergic_neurons","MB_HB_glutamatergic_neurons_immature","MB_HB_neurons_LHX1+",
+                   "Oculomotor_neurons","Progenitors_cycling", "STN_neurons","Ventral_FB_MB_progenitors","Ventral_FB_MB_progenitors_cycling",
+                   #primary data
+                   "FB_MB_glutamatergic_neurons" ,"Lateral_MB_HB_progenitors" , "HB_glutamatergic_neurons" ,"Thalamic_progenitors",
+                   "FB_GABAergic_neurons" , "Thalamic_glutamatergic_neurons" ,"Lateral_MB_progenitors_neurogenesis" ,
+                   "FB_glutamatergic_neurons","Caudal_MB_progenitors" , "MB_HB_GABAergic_glycinergic_neurons_immature", "OPCs", 
+                   "MB_HB_GABAergic_glycinergic_neurons", "MB_dorsal_RP_progenitors" , "Low_quality_technical" )
+Merged_all.combined$supervised_name <- factor(Merged_all.combined$supervised_name, levels = celltype_order)
+
+#rename source for schmitz data
+Merged_all.combined <- SetIdent(Merged_all.combined, value = "source")
+Merged_all.combined$source <- as.factor(Merged_all.combined$source)
+Merged_all.combined <- RenameIdents(object = Merged_all.combined,  'primary_Schmitz' = 'primary_Eze')
+Merged_all.combined$source <- Merged_all.combined@active.ident
+
+#rename source to highlight data newly collected
+Merged_all.combined$source <- as.character(Merged_all.combined$source)
+Merged_all.combined$source[Merged_all.combined$batch_name %in% c('GW23_Mesencephalon_1_kOut', 'GW23_Mesencephalon_2_kOut')] <- 'this study'
+
+
+pdf(paste(fig_dir, 'umap_integration_source.pdf',sep=''),width=4, height=3)
+dittoDimPlot(Merged_all.combined, 'source', theme=ggpubr::theme_classic2(), order = "randomize",color.panel = pal_npg("nrc",alpha = 0.6)(10))+ NoAxes()+ggtitle('')
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_celltype.pdf',sep=''),width=17, height=4.5)
+dittoDimPlot(Merged_all.combined,'supervised_name',split.by ='source', theme=ggpubr::theme_classic2(),color.panel = colors)+ NoAxes()+ggtitle('')
+dev.off()
+
+
+pdf(paste(fig_dir, 'umap_integration_feature.pdf',sep=''),width=9, height=3)
+FeaturePlot(Merged_all.combined, c('TH','LMX1A','NR4A2'),ncol=3,cols=c('white','black'))
+dev.off()
+
+pdf(paste(fig_dir, 'umap_integration_timepoint.pdf',sep=''),width=5, height=3)
+Merged_all.combined$data <- ifelse(Merged_all.combined$source == 'organoids', 'this study (DIV)', 'in vivo atlas (PCD)')
+Merged_all.combined$timepoint <- ifelse(Merged_all.combined$source == 'organoids', as.numeric(sub('^.', '', Merged_all.combined$time_point)), Merged_all.combined$timepoint)
+dittoDimPlot(Merged_all.combined, 'timepoint', do.label = TRUE,split.by = 'data', theme=ggpubr::theme_classic2())+ NoAxes()+ggtitle('')
+dev.off()
+
+cds <- readRDS('~/Desktop/Sara/merged.human.monocle.rds')
+pdf(paste(fig_dir, 'umap_integration_pseudotime.pdf',sep=''),width=4.5, height=4)
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = FALSE,
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           label_roots = FALSE,
+           trajectory_graph_color = "black")+ NoAxes()
+dev.off()
+
+#p2 <- dittoDimPlot(subset(Merged_all.combined, subset = source %in% c('organoids')), 'time_point', do.label = FALSE)
+#p3 <- dittoDimPlot(subset(Merged_all.combined, subset = source %in% c('primary_Braun','primary_Schmitz')), 'PCW', do.label = TRUE)
+
+library(scCustomize)
+Merged_all.combined$source_supervised_name <- paste(Merged_all.combined$source,Merged_all.combined$supervised_name,sep='_')
+Merged_all.combined <- SetIdent(Merged_all.combined, value = "source_supervised_name")
+p3 <- Cluster_Highlight_Plot(Merged_all.combined, cluster_name = c("organoids_DA_neurons"), highlight_color = "gold",
+                       background_color = "lightgray",  pt.size = 2)+NoLegend()+ggtitle('organoids')
+p2 <- Cluster_Highlight_Plot(Merged_all.combined, cluster_name = c("primary_Braun_DA_neurons"), highlight_color = "gold",
+                       background_color = "lightgray",  pt.size = 2)+NoLegend()+ggtitle('primary_Braun')
+p1 <- Cluster_Highlight_Plot(Merged_all.combined, cluster_name = c("primary_Eze_DA_neurons"), highlight_color = "gold",
+                       background_color = "lightgray",  pt.size = 2)+NoLegend()+ggtitle('primary_Eze')
+
+pdf(paste(fig_dir, 'umap_integration_DA.pdf',sep=''),width=9, height=3.2)
+p1+p2+p3
+dev.off()
+
+
+Merged_all.combined <- SetIdent(Merged_all.combined, value = "supervised_name")
+Idents(Merged_all.combined) <- factor(Merged_all.combined@active.ident, sort(levels(Merged_all.combined@active.ident)))
+Merged_all.combined$data <- ifelse(Merged_all.combined$source == 'organoids', 'this study', 'in vivo atlas')
+Merged_all.combined@active.ident <- factor(Merged_all.combined@active.ident, levels = rev(celltype_order))
+celltype_order <- c("FB_progenitors","Lateral_MB_progenitors","Ventral_FB_MB_progenitors","DA_neurons","STN_neurons","MB_HB_glutamatergic_neurons",
+                    "DA_STN_neurons_immature","Glial_progenitors_astrocytes","Hypothalamic_neurons",
+                    "Lateral_MB_progenitors_cycling", #"skip",
+                    "MB_GABAergic_neurons",#"skip",
+                    "MB_glutamatergic_neurons", "MB_HB_FP_cells","MB_HB_glutamatergic_neurons_immature","MB_HB_neurons_LHX1+",
+                    "Oculomotor_neurons","Progenitors_cycling", "Ventral_FB_MB_progenitors_cycling",
+                    #primary data
+                    "FB_MB_glutamatergic_neurons" ,"Lateral_MB_HB_progenitors" , "HB_glutamatergic_neurons" ,"Thalamic_progenitors",
+                    "FB_GABAergic_neurons" , "Thalamic_glutamatergic_neurons" ,"Lateral_MB_progenitors_neurogenesis" ,
+                    "FB_glutamatergic_neurons","Caudal_MB_progenitors" , "MB_HB_GABAergic_glycinergic_neurons_immature", "OPCs", 
+                    "MB_HB_GABAergic_glycinergic_neurons", "MB_dorsal_RP_progenitors" , "Low_quality_technical" )
+genes <- c('SOX2','PAX6','GPC3','PAX3','GAP43','EN1','TH','NR4A2','LMX1A','PITX2','SLC17A6')
+
+p1 <- DotPlot(object = subset(x = Merged_all.combined, subset = data == "in vivo atlas"),, assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+                   'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = "black")+ggtitle('primary')#+theme(axis.text.x=element_blank())
+
+p2 <- DotPlot(object = subset(x = Merged_all.combined, subset = data == "this study" & species == 'human'), assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+              idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',                                      'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+theme(axis.text.y=element_blank())+ scale_colour_gradient(low = "white", high = "black")+ggtitle('organoids')#+theme(axis.text.x=element_blank())
+
+p1 <- DotPlot(object = subset(x = Merged_all.combined, subset = data == "in vivo atlas" & source == 'primary_Eze'),, assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+                   'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = pal_npg("nrc")(10)[1])+ggtitle('primary_Eze')
+
+p2 <- DotPlot(object = subset(x = Merged_all.combined, subset = data == "in vivo atlas" & source == 'primary_Braun'),, assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+                   'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = pal_npg("nrc")(10)[2])+ggtitle('primary_Braun')
+
+idents <- c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+            'MB_HB_glutamatergic_neurons')
+
+p1 <- DotPlot(object = subset(x = Merged_all, subset = data == "in vivo atlas" & species == 'human' & supervised_name %in% idents), assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = idents)+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = "#F4A339")+ggtitle('primary-human')#+theme(axis.text.x=element_blank())
+p2 <- DotPlot(object = subset(x = Merged_all, subset = data == "in vivo atlas" & species == 'macaque' & supervised_name %in% idents), assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = idents)+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = '#7E2859')+ggtitle('primary-macaque')#+theme(axis.text.x=element_blank())
+
+
+p2 <- DotPlot(object = subset(x = Merged_all.combined, subset = data == "this study" & species == 'human'), assay = 'originalexp', features = genes, col.min = -2,col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',                                      'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+theme(axis.text.y=element_blank())+ scale_colour_gradient(low = "white", high = "#F4A339")+ggtitle('organoids-human')+theme(axis.text.x=element_blank())
+
+p3 <- DotPlot(object = subset(x = Merged_all, subset = data == "this study" & species == 'chimp'), assay = 'originalexp', features = genes , col.min = -2, col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+                   'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+ scale_colour_gradient(low = "white", high = '#3957A6')+ggtitle('organoids-chimp')#+theme(axis.text.y=element_blank()) 
+
+p4 <- DotPlot(object = subset(x = Merged_all, subset = data == "this study" & species == 'macaque'), assay = 'originalexp', features = genes , col.min = -2, col.max = 3,
+        idents = c('FB_progenitors','Ventral_FB_MB_progenitors','Lateral_MB_progenitors','DA_neurons','STN_neurons',
+                   'MB_HB_glutamatergic_neurons'))+RotatedAxis()+xlab('')+ylab('')+theme(axis.text.y=element_blank()) + scale_colour_gradient(low = "white",  high = '#7E2859')+ggtitle('organoids-macaque')
+
+
+pdf(paste(fig_dir, 'dotplot_integration_human.pdf',sep=''),width=7.8, height=2.8)
+(p1+NoLegend())+(p2+NoLegend())
+dev.off()
+
+pdf(paste(fig_dir, 'dotplot_integration.pdf',sep=''),width=8, height=5)
+(p1+NoLegend())+(p2+NoLegend())+(p3+NoLegend())+(p4+NoLegend())
+dev.off()
+
+pdf(paste(fig_dir, 'dotplot_integration_legend.pdf',sep=''),width=20, height=7.5)
+(p1+p2+p3+p4)
+dev.off()
+
+nn_graph <- Merged_all.combined@graphs$integrated_snn
+average_values <- numeric(ncol(Merged_all.combined))
+metadata_values <- Merged_all.combined@meta.data[["timepoint"]]
+for (i in 1:ncol(Merged_all.combined)) {
+    # Get the indices of the neighbors
+    neighbors <- which(nn_graph[i, ] > 0)
+    
+    # Compute the average value for the neighbors
+    average_values[i] <- mean(metadata_values[neighbors], na.rm = TRUE)
+}
+Merged_all.combined <- AddMetaData(Merged_all.combined, metadata = average_values, col.name = "timepoint_snn_avg")
+Merged_all.combined$time_point <- factor(Merged_all.combined$time_point, levels = c("D40", "D80", 'D100'))
+
+pdf(paste(fig_dir, 'vlnplot_PCD.pdf',sep=''),width=4, height=3)
+VlnPlot(subset(x = Merged_all.combined, subset = supervised_name == "DA_neurons" & time_point %in% c("D40", "D80", 'D100')),features = 'timepoint_snn_avg',group.by ='time_point',pt.size = 0)+ NoLegend()+ggtitle('Mean PCD of nearest neighbours')+geom_boxplot(width=0.1,fill="white")+xlab('')+ scale_fill_manual(values = c( "#a62a2b", "#c0c0c0","#000000"))
+dev.off()
+```
+
+
+```{r}
+cds <- as.cell_data_set(Merged_all.combined)
+cds <- cluster_cells(cds, resolution=0.0005)
+
+p1 <- plot_cells(cds, color_cells_by = "cluster", show_trajectory_graph = FALSE)
+p2 <- plot_cells(cds, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots(p1, p2)
+
+integrated.sub <- subset(as.Seurat(cds, assay = NULL), monocle3_partitions == 1)
+cds <- as.cell_data_set(integrated.sub)
+cds <- learn_graph(cds, use_partition = TRUE, verbose = FALSE,learn_graph_control = list(minimal_branch_len=20))
+plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE)
+
+#use vMB progenitors as root
+cds <- order_cells(cds, root_cells = colnames(cds[,clusters(cds) == 1]))
+plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = FALSE,
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           label_roots = FALSE,
+           trajectory_graph_color = "grey60")
+
+saveRDS(cds, '~/Desktop/Sara/merged.human.monocle.rds')
+```
+
+
+
+```{r}
+valid_cells <- row.names(subset(pData(cds),
+                                supervised_name %in% c('DA_neurons','Ventral_FB_MB_progenitors_cycling','Ventral_FB_MB_progenitors','DA_STN_neurons_immature')))
+cds <- cds[,valid_cells]
+
+cds_graph_test_results <- graph_test(cds,
+                                     neighbor_graph = "principal_graph",
+                                     cores = 8)
+deg_ids <- rownames(subset(cds_graph_test_results[order(cds_graph_test_results$morans_I, decreasing = TRUE),], q_value < 0.05))
+gene_modules <- find_gene_modules(cds[deg_ids,],
+                                  resolution=c(10^seq(-6,-1)))
+table(gene_modules$module)
+```
+
+
+
+#maturation figure
+```{r}
+sourcefile <- file.path('~/Desktop/Sara/20240313_GEX_D40-D100-D80.DA.h5ad')
+ad <- readH5AD(sourcefile,X_name='counts')
+organoids <- as.Seurat(ad, counts = "counts", data = "counts")
+organoids$source <- 'organoids'
+rm(ad)
+gc()
+
+####Merge by source and subset human
+Merged_all <- organoids
+Merged_all$supervised_name <- gsub(",", "", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub("/", "_", Merged_all$supervised_name)
+Merged_all$supervised_name <- gsub(" ", "_", Merged_all$supervised_name)
+
+Merged_all.list <- SplitObject(Merged_all, split.by = "species")
+Merged_all.list <- lapply(X = Merged_all.list, FUN = function(x) {
+  x <- NormalizeData(x) 
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 1000)
+})
+
+features <- SelectIntegrationFeatures(object.list = Merged_all.list)
+Merged_all.list <- lapply(X = Merged_all.list, FUN = function(x) {
+    x <- ScaleData(x, features = features, verbose = FALSE)
+    x <- RunPCA(x, features = features, verbose = FALSE)
+})
+gc()
+
+Merged_all.anchors <- FindIntegrationAnchors(object.list = Merged_all.list, anchor.features = features, reduction = "rpca",k.anchor = 100)
+Merged_all.combined <- IntegrateData(anchorset = Merged_all.anchors) 
+
+DefaultAssay(Merged_all.combined) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+Merged_all.combined <- ScaleData(Merged_all.combined, verbose = FALSE)
+Merged_all.combined <- RunPCA(Merged_all.combined, npcs = 50, verbose = FALSE)
+ElbowPlot(Merged_all.combined, ndims = 50)
+# UMAP
+#library(reticulate)
+#use_python(python = "~/opt/anaconda3/bin/python", required = TRUE)
+Merged_all.combined <- RunUMAP(Merged_all.combined, reduction = "pca", dims = 1:50)
+Merged_all.combined <- FindNeighbors(Merged_all.combined, reduction = "pca", dims = 1:30)
+Merged_all.combined <- FindClusters(Merged_all.combined, resolution = 0.5)
+
+pdf(paste(fig_dir, 'umap_RPCA.pdf',sep=''),width=18, height=45)
+p1 <- dittoDimPlot(Merged_all.combined,'species', do.label = FALSE,theme=ggpubr::theme_classic2() )+ NoAxes()
+p2 <- dittoDimPlot(Merged_all.combined,'supervised_name', do.label = FALSE,theme=ggpubr::theme_classic2(), color.panel = c( "#1f77b4", "#aec7e8","#17becf"))+ NoAxes()
+p3 <- dittoDimPlot(Merged_all.combined, 'time_point', do.label = FALSE,split.by = 'species',,theme=ggpubr::theme_classic2(),order = "randomize")+ NoAxes()
+
+saveRDS(Merged_all.combined, '~/Desktop/Sara/merged.DA.rds')
+```
+
+
+```{r}
+cds <- as.cell_data_set(Merged_all.combined)
+cds <- cluster_cells(cds, resolution=0.00001)
+
+p1 <- plot_cells(cds, color_cells_by = "cluster", show_trajectory_graph = FALSE)
+p2 <- plot_cells(cds, color_cells_by = "partition", show_trajectory_graph = FALSE)
+wrap_plots(p1, p2)
+
+integrated.sub <- subset(as.Seurat(cds, assay = NULL), monocle3_partitions == 1)
+cds <- as.cell_data_set(integrated.sub)
+cds <- learn_graph(cds, use_partition = TRUE, verbose = FALSE)
+plot_cells(cds,
+           color_cells_by = "cluster",
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE)
+
+#use vMB progenitors as root
+cds <- order_cells(cds, root_cells = colnames(cds[,clusters(cds) == 1]))
+p3 <- plot_cells(cds,
+           color_cells_by = "pseudotime",
+           group_cells_by = "cluster",
+           label_cell_groups = FALSE,
+           label_groups_by_cluster=FALSE,
+           label_leaves=FALSE,
+           label_branch_points=FALSE,
+           label_roots = FALSE,
+           trajectory_graph_color = "black")+ NoAxes()
+
+integrated.sub <- as.Seurat(cds, assay = NULL)
+integrated.sub <- SetIdent(integrated.sub, value = "supervised_name")
+integrated.sub$species <- factor(integrated.sub$species, levels = c("human", "chimp", 'orangutan',"macaque"))
+
+Merged_all.combined <- subset(Merged_all.combined, individual != 'NA')
+Merged_all.combined$individual <- paste(Merged_all.combined$species, Merged_all.combined$individual,sep= '_')
+Merged_all.combined$individual <- factor(Merged_all.combined$individual)
+custom_colors = c('cornflowerblue','royalblue','mediumblue', 'dodgerblue', 'lightsteelblue', 'navy','blue',
+  'darkkhaki', 'goldenrod', 'navajowhite', 'darkorange', 'khaki', 'yellow', 'gold', 'orange', 'mediumvioletred',
+  'purple','magenta','sienna')
+
+fig_dir = '~/Desktop/Sara/figures/maturation/' 
+
+pdf(paste(fig_dir, 'umap_RPCA.pdf',sep=''),width=18, height=45)
+Merged_all.combined$species <- factor(Merged_all.combined$species, levels = c("human", "chimp", 'orangutan',"macaque"))
+p11 <- dittoDimPlot(Merged_all.combined,'supervised_name', do.label = TRUE,theme=ggpubr::theme_classic2(),color.panel = c( "#1f77b4", "#aec7e8","#17becf"),order = "randomize")+ NoAxes()+ggtitle('')+NoLegend()
+p12 <- dittoDimPlot(Merged_all.combined,'pool_type', do.label = FALSE,theme=ggpubr::theme_classic2(),order = "randomize")+ NoAxes()+ggsci::scale_color_cosmic()+ggtitle('')
+p13 <- dittoDimPlot(Merged_all.combined,'individual', do.label = FALSE,theme=ggpubr::theme_classic2(),order = "randomize",color.panel = custom_colors)+ NoAxes()+ggtitle('')
+p2 <- dittoDimPlot(Merged_all.combined, 'time_point', do.label = FALSE,split.by = 'species',,theme=ggpubr::theme_classic2(),color.panel = c("#000000", "#a62a2b", "darkgrey"), order = "randomize")+ NoAxes()+ggtitle('')
+
+pdf(paste(fig_dir, 'umap_celltype.pdf',sep=''),width=5, height=5)
+print(p11)
+dev.off()
+
+pdf(paste(fig_dir, 'umap_pooltype.pdf',sep=''),width=4, height=3)
+print(ggpubr::ggarrange(p12,ncol=1))
+dev.off()
+
+pdf(paste(fig_dir, 'umap_individual.pdf',sep=''),width=6.5, height=5)
+print(p13)
+dev.off()
+
+pdf(paste(fig_dir, 'umap_species.pdf',sep=''),width=4, height=3.5)
+print(p2)
+dev.off()
+
+pdf(paste(fig_dir, 'umap_pseudotime.pdf',sep=''),width=4, height=3)
+print(p3)
+dev.off()
+
+pdf(paste(fig_dir, 'ridge_pseudotime.pdf',sep=''),width=4, height=4)
+p41 <- RidgePlot(subset(x = integrated.sub, subset = time_point == "D40"), features = 'monocle3_pseudotime',group.by ='species',cols = c("#F4A339",'#3957A6',"#754D27",'#7E2859'))+ NoLegend()+ggtitle('Pseudotime on D40')+ylab('')
+p42 <- RidgePlot(subset(x = integrated.sub, subset = time_point == "D80"), features = 'monocle3_pseudotime',group.by ='species',cols = c("#F4A339",'#3957A6',"#754D27",'#7E2859'))+NoLegend()+ggtitle('Pseudotime on D80')+ylab('')
+print(plot_grid(p41, p42, rel_heights = c(1, 1), labels = c('', ''), ncol = 1))
+dev.off()
+
+```
+
+
+```{r}
+cds <- readRDS('~/Desktop/Sara/merged.DA.monocle.rds')
+integrated.sub <- subset(as.Seurat(cds, assay = NULL))
+
+df <- subset(x = integrated.sub, subset = supervised_name == "DA_neurons" & individual != "NA" & batch %in% c("D80_M_0-6_CNTRL_Chimp","D80_M_0-6_CNTRL_Human","D80_M_0-8_CNTRL_Chimp","D80_M_0-8_CNTRL_Human","D80_M_0-8_CNTRL-2_Human","D80_M_0-8_CNTRL-2_Chimp","D80_M_0-8_CNTRL-3_Human","D80_M_0-8_CNTRL-3_Chimp"))@meta.data %>% group_by(individual,species) %>%
+    summarise(mean_pseudotime = mean(monocle3_pseudotime))  %>% ungroup()
+
+my_comparisons <- list( c("human", "chimp"))
+df$species <- factor(df$species, levels = c('human','chimp'))
+p <- ggboxplot(df, y = 'mean_pseudotime', x = "species",xlab='', ylab='mean pseudotime',
+          fill = "species",palette = c("#F4A339",'#3957A6'),
+          add = "dotplot", add.params = list(shape = 21)) + rremove("legend") + rotate_x_text(45) + 
+    stat_compare_means(comparisons = my_comparisons,method = "t.test",paired = FALSE)  + 
+    theme(legend.position="none")+ ylim(20, 26)
+
+fig_dir = '~/Desktop/Sara/figures/maturation/' 
+pdf(paste(fig_dir, 'species_pseudotime_DA.pdf',sep=''),width=3, height=4)
+print(p)
+dev.off()
+
+p <- RidgePlot(subset(x = integrated.sub, subset = supervised_name == "DA_neurons" & individual != "NA" & batch %in% c("D80_M_0-6_CNTRL_Chimp","D80_M_0-6_CNTRL_Human","D80_M_0-8_CNTRL_Chimp","D80_M_0-8_CNTRL_Human","D80_M_0-8_CNTRL-2_Human","D80_M_0-8_CNTRL-2_Chimp","D80_M_0-8_CNTRL-3_Human","D80_M_0-8_CNTRL-3_Chimp")),features = 'monocle3_pseudotime',group.by ='individual')+ NoLegend()+ggtitle('')+geom_boxplot(width=0.1,fill="white")+xlab('')#+ scale_fill_manual(values = c( "#F4A339",'#3957A6'))
+
+pdf(paste(fig_dir, 'ridge_pseudotime_individual.pdf',sep=''),width=4, height=4)
+print(p)
+dev.off()
+
+df <- subset(x = integrated.sub, subset = supervised_name == "DA_neurons" & time_point == "D80" & individual != "NA")@meta.data %>% group_by(individual,species) %>%
+    summarise(mean_pseudotime = mean(monocle3_pseudotime))  %>% ungroup()
+
+my_comparisons <- list( c("human", "chimp"),c("human", "macaque"))
+df$species <- factor(df$species, levels = c('human','chimp','macaque','orangutan'))
+p <- ggboxplot(df, y = 'mean_pseudotime', x = "species",xlab='', ylab='mean pseudotime',
+               fill = "species",palette = c("#F4A339",'#3957A6',"#754D27",'#7E2859'),
+               add = "dotplot", add.params = list(shape = 21)) + rremove("legend") + rotate_x_text(45) + 
+    stat_compare_means(comparisons = my_comparisons,method = "t.test",paired = FALSE)  + 
+    theme(legend.position="none")+ ylim(20, 29)
+
+
+```
+
+
+```{r}
+library(ComplexHeatmap)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(circlize)
+library(monocle3)
+
+modulated_genes <- graph_test(cds, neighbor_graph = "principal_graph", cores = 4)
+genes <- row.names(subset(modulated_genes, q_value == 0 & morans_I > 0.25))
+genes <- c('CACNA1A', 'CACNA1B', 'CACNA1C', 'CACNA1D', 'CALM1', 'CALM3',
+       'CALY', 'DDC', 'GNAL', 'GRIA2', 'GRIA4','GRIN2B',
+       'KCNJ6', 'KIF5C', 'PLCB1', 'PPP2R2B', 'PPP2R2C', 'PRKCB','SOX2',
+       'TH','LMX1A','NR4A2','MKI67','SLC18A2')
+genes <- intersect(genes, rownames(exprs(cds)))
+
+pt.matrix <- exprs(cds)[match(genes,rownames(rowData(cds))),order(pseudotime(cds))]
+#Can also use "normalized_counts" instead of "exprs" to use various normalization methods, for example:
+#normalized_counts(cds, norm_method = "log")
+
+pt.matrix <- t(apply(pt.matrix,1,function(x){smooth.spline(x,df=3)$y}))
+pt.matrix <- t(apply(pt.matrix,1,function(x){(x-mean(x))/sd(x)}))
+rownames(pt.matrix) <- genes;
+
+hthc <- Heatmap(
+  pt.matrix,
+  name                         = "z-score",
+  col                          = colorRamp2(seq(from=-2,to=2,length=11),rev(brewer.pal(11, "Spectral"))),
+  show_row_names               = TRUE,
+  show_column_names            = FALSE,
+  row_names_gp                 = gpar(fontsize = 6),
+  clustering_method_rows = "ward.D2",
+  clustering_method_columns = "ward.D2",
+  row_title_rot                = 0,
+  cluster_rows                 = TRUE,
+  cluster_row_slices           = FALSE,
+  cluster_columns              = FALSE, use_raster = FALSE)
+
+
+pdf(paste(fig_dir, 'heatmap_dopa.pdf',sep=''),width=4, height=6)
+print(hthc)
+dev.off()
+```

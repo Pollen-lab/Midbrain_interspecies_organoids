@@ -1,0 +1,259 @@
+---
+#Sara's rotenone data, Chimp and Human only, running rPCA
+#10-9-24: added individuals so doublets can be removed in Sara's plotting
+---
+
+```{r setup, include=FALSE}
+rm(list = ls())
+library(Seurat)
+library(stringr)
+library(rlang)
+library(ggplot2)
+library(SingleCellExperiment)
+library(patchwork)
+library(dplyr)
+#library(scater)
+set.seed(1)
+source('/media/jenelle/4TB_disk/Dropbox/R_analysis/MyFunctions.R')
+source('/media/jenelle/4TB_disk/Dropbox/R_analysis/MySeuratFunctions.R')
+species = c("Human", "Chimp")
+options(error=stop)
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning=FALSE,
+  message=FALSE,
+  error = FALSE,
+  tidy = FALSE,
+  dev = c("png", "pdf"),
+  cache = TRUE,
+  cache.lazy = FALSE)
+
+version_folder = '/media/jenelle/4TB_disk/Dropbox/Sara_analysis/Seurat_rotenone/V5/'
+libraries_folder = '/media/jenelle/4TB_disk/Dropbox/Sara_analysis/Seurat_rotenone/Libraries/'
+dir.create(version_folder)
+figure_folder = strcat(version_folder,'/Figures/');dir.create(figure_folder)
+sink(strcat(version_folder,'session_info.txt'), append = FALSE, type = "output")
+sessionInfo(); sink()
+```
+
+
+#Load libraries----
+```{r}
+libraries = dir(libraries_folder)
+rna_before = list()
+for (sp in species){
+  indices = grep(sp,libraries); sp_libraries = libraries[indices]
+  objs = list()
+  for (library in sp_libraries){
+    data_dir = paste0(libraries_folder, library)
+    data <- Read10X(data.dir = data_dir)
+    objs[[library]] = CreateSeuratObject(counts = data$`Gene Expression`, project = library, min.cells = 10)
+  }
+  rna_before[[sp]] <- merge(objs[[1]], y = objs[2:length(objs)],add.cell.ids = sp_libraries)
+  rna_before[[sp]]$species = sp
+}
+saveRDS(rna_before,paste0(version_folder,'rna_before.rds'))
+```
+#Quality control----
+```{r, fig.show='asis'}
+table_conds_cells_before = list()
+rna_after = list()
+for (sp in species){
+  table_conds_cells_before[[sp]] <- table(rna_before[[sp]]$orig.ident)
+  rna_before[[sp]][["percent.mt"]] <- PercentageFeatureSet(rna_before[[sp]], pattern = "^MT-")
+  rna_before[[sp]][["percent.ribo"]] <- PercentageFeatureSet(rna_before[[sp]], pattern = "^RP[LS]")
+  p = VlnPlot(rna_before[[sp]], features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.ribo"), group.by = "orig.ident", ncol=6, pt.size= 0)
+  ggsave(strcat(figure_folder,"quality_violin_before_",sp,".png"), plot = p, width = 8, height = 4, units = 'in')
+  counts_data <- as.data.frame(rna_before[[sp]]$nCount_RNA)
+  feature_data <- as.data.frame(rna_before[[sp]]$nFeature_RNA)
+  percent_mt_data  <- rna_before[[sp]][["percent.mt"]]
+  percent_ribo <- rna_before[[sp]][["percent.ribo"]]
+ p1 <- ggplot(counts_data, aes(x = rna_before[[sp]]$nCount_RNA)) +
+    geom_histogram(binwidth = 500, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Counts per cell",y = "Count")
+  p2 <- ggplot(feature_data, aes(x = rna_before[[sp]]$nFeature_RNA)) +
+    geom_histogram(binwidth = 100, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Genes per cell",y = "Count")
+  p3 <- ggplot(percent_mt_data, aes(x = percent.mt)) +
+    geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Percent Mitochondrial Genes",y = "Count")
+p4 <- ggplot(percent_ribo, aes(x = percent.ribo)) +
+    geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Percent Ribosomal Genes",y = "Count")
+p <- p1+p2+p3+p4+plot_layout(nrow = 2, ncol = 2); print(p)
+ggsave(paste0(version_folder,'histograms_quality_before_',sp,'.png'),p,width = 6, height = 6, units = 'in')
+
+#Quality filter
+rna_after[[sp]] <- subset(rna_before[[sp]], subset = nFeature_RNA > 1000 & nFeature_RNA < 7500 & nCount_RNA > 1000 & percent.mt < 15)
+
+counts_data <- as.data.frame(rna_after[[sp]]$nCount_RNA)
+  feature_data <- as.data.frame(rna_after[[sp]]$nFeature_RNA)
+  percent_mt_data  <- rna_after[[sp]][["percent.mt"]]
+  percent_ribo <- rna_after[[sp]][["percent.ribo"]]
+ p1 <- ggplot(counts_data, aes(x = rna_after[[sp]]$nCount_RNA)) +
+    geom_histogram(binwidth = 500, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Counts per cell",y = "Count")
+  p2 <- ggplot(feature_data, aes(x = rna_after[[sp]]$nFeature_RNA)) +
+    geom_histogram(binwidth = 100, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Genes per cell",y = "Count")
+  p3 <- ggplot(percent_mt_data, aes(x = percent.mt)) +
+    geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Percent Mitochondrial Genes",y = "Count")
+p4 <- ggplot(percent_ribo, aes(x = percent.ribo)) +
+    geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(x = "Percent Ribosomal Genes",y = "Count")
+p <- p1+p2+p3+p4+plot_layout(nrow = 2, ncol = 2); print(p)
+ggsave(paste0(version_folder,'histograms_quality_after_',sp,'.png'),p,width = 6, height = 6, units = 'in')
+}
+saveRDS(rna_after,paste0(version_folder,'rna_after.rds'))
+```
+
+#Load and merge----
+```{r}
+#load and merge objects for each species after quality control
+rna_after <- readRDS(paste0(version_folder,'rna_after.rds'))
+for (i in 1:length(species)){
+  sp = species[i]
+  if (i ==1){rna = rna_after[[1]]
+  } else{
+  rna <- merge(rna, y = rna_after[[i]])
+  }
+}
+
+#Add condition column
+rna$condition <- ifelse(grepl("24H", rna$orig.ident), "24H",
+                         ifelse(grepl("72H", rna$orig.ident), "72H",
+                                ifelse(grepl("CNTRL", rna$orig.ident), "CNTRL", NA)))
+
+```
+#Process without integrating
+```{r}
+# run standard anlaysis workflow
+rna <- NormalizeData(rna)
+rna <- FindVariableFeatures(rna)
+rna <- ScaleData(rna)
+rna <- RunPCA(rna)
+rna <- FindNeighbors(rna, dims = 1:30, reduction = "pca")
+rna <- FindClusters(rna, resolution = 1, cluster.name = "unintegrated_clusters")
+rna <- RunUMAP(rna, dims = 1:30, reduction = "pca", reduction.name = "umap.unintegrated")
+DimPlot(rna, reduction = "umap.unintegrated", group.by = c("condition", "species"))
+```
+
+#Integrate----
+```{r}
+options(future.globals.maxSize = 1000 * 1024^2) #prevents error due to parallelization and size of global variables (https://satijalab.org/seurat/archive/v3.0/future_vignette.html)
+rna <- IntegrateLayers(
+  object = rna, method = RPCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.rpca",
+  verbose = FALSE
+)
+# re-join layers after integration
+rna[["RNA"]] <- JoinLayers(rna[["RNA"]])
+rna <- FindNeighbors(rna, reduction = "integrated.rpca", dims = 1:30)
+rna <- FindClusters(rna, resolution = 1)
+rna <- RunUMAP(rna, dims = 1:30, reduction = "integrated.rpca")
+saveRDS(rna,paste0(version_folder,'rna.rds'))
+```
+
+#Plot
+```{r}
+DimPlot(rna, reduction = "umap", group.by = c("condition", "species","seurat_clusters"),ncol = 2, shuffle = TRUE)
+savePlot('png',paste0(figure_folder,'umaps.png'), height = 6, width = 8, units = 'in', res= 300)
+FeaturePlot(rna, features = c("TH", "EN1", "SLC18A2","LMX1A"), max.cutoff = 3, cols = c("grey",
+    "blue"), reduction = "umap")
+savePlot('png',paste0(figure_folder,'umaps_genes.png'), height = 6, width = 8, units = 'in', res= 300)
+markers <- c("SOX2","NFIA","MKI67","DLL3","GAP43","GFAP","PAX3","BOC","ZIC1","LMX1A","FOXA2","EN1","NR4A2","DDC","TH","TMCC3","KCNJ6","CALB1","SLC17A6","ONECUT1","ONECUT2","LHX1","LHX9","PHOX2B","SST","SLC13A1","GAD1","TFAP2B","CBLN1","TPT1","ARF4","SRP54","SCFD2","FOS")
+DotPlot(rna, features = markers,scale = FALSE) + RotatedAxis()
+savePlot('png',paste0(figure_folder,'dotplot.png'), height = 6, width = 8, units = 'in', res= 300)
+dop_neurons = subset(rna, subset = seurat_clusters=='3'|seurat_clusters=='14'|seurat_clusters=='15')
+dop_neurons$condition <- factor(dop_neurons$condition, levels = c('CNTRL','24H','72H'))
+cell_num_table <- table(dop_neurons$condition,dop_neurons$species); print(cell_num_table)
+row_proportions <- prop.table(cell_num_table, margin = 1); print(row_proportions)
+
+```
+
+#Save as anndata
+```{r}
+library(SeuratDisk)
+#Convert back to v3 (because layers mess up conversion)
+rna_rotenone_dop = rna
+rna_rotenone_dop[["RNA"]] <- as(object = rna_rotenone_dop[["RNA"]], Class = "Assay")
+SaveH5Seurat(rna_rotenone_dop, filename = paste0(version_folder,"rna_rotenone_dop.h5Seurat"))
+Convert(paste0(version_folder, "rna_rotenone_dop.h5Seurat"), dest = "h5ad")
+```
+
+#Subcluster dopamine neurons
+```{r}
+rna <- readRDS(paste0(version_folder,'rna.rds'))
+subset = subset(rna, subset = seurat_clusters=='3'|seurat_clusters=='11'|seurat_clusters=='14'|seurat_clusters=='15')
+dop_neurons = subset; dop_neurons = DietSeurat(dop_neurons,layers = 'counts')
+dop_neurons[["RNA"]]$scale.data <- NULL; dop_neurons[["RNA"]]$data <- NULL  #getting rid of other calculations
+dop_neurons[["RNA"]] <- split(dop_neurons[["RNA"]], f = dop_neurons$orig.ident)
+dop_neurons <- NormalizeData(dop_neurons)
+dop_neurons <- FindVariableFeatures(dop_neurons)
+dop_neurons <- ScaleData(dop_neurons)
+dop_neurons <- RunPCA(dop_neurons)
+dop_neurons <- IntegrateLayers(
+  object = dop_neurons, method = RPCAIntegration,
+  orig.reduction = "pca", new.reduction = "integrated.rpca",
+  k.weight = 90, #reduced from 100 due to error message (too few cells)
+  verbose = FALSE
+)
+dop_neurons[["RNA"]] <- JoinLayers(dop_neurons[["RNA"]])
+dop_neurons <- FindNeighbors(dop_neurons, reduction = "integrated.rpca", dims = 1:20)
+dop_neurons <- FindClusters(dop_neurons, resolution = 0.4)
+dop_neurons <- RunUMAP(dop_neurons, dims = 1:20, reduction = "integrated.rpca")
+saveRDS(dop_neurons,paste0(version_folder,'dop_neurons.rds'))
+
+#Plot again
+dop_neurons <- readRDS(paste0(version_folder,'dop_neurons.rds'))
+DimPlot(dop_neurons, reduction = "umap", group.by = c("condition", "species","seurat_clusters","RNA_snn_res.1"),ncol = 2, shuffle = TRUE)
+savePlot('png',paste0(figure_folder,'umaps.png'), height = 6, width = 8, units = 'in', res= 300)
+FeaturePlot(dop_neurons, reduction = "umap", features = c("nCount_RNA","percent.mt", "percent.ribo"),ncol = 3)
+savePlot('png',paste0(figure_folder,'umap_quality.png'), height = 6, width = 10, units = 'in', res= 300)
+
+markers <- c("SOX2","NFIA","MKI67","DLL3","GAP43","GFAP","PAX3","BOC","ZIC1","LMX1A","FOXA2","EN1","NR4A2","DDC","TH","TMCC3","KCNJ6","CALB1","SLC17A6","ONECUT1","ONECUT2","LHX1","LHX9","PHOX2B","SST","SLC13A1","GAD1","TFAP2B","CBLN1","TPT1","ARF4","SRP54","SCFD2","FOS", "GATA3","TPH2")
+DotPlot(dop_neurons, features = markers,scale = FALSE) + RotatedAxis()
+savePlot('png',paste0(figure_folder,'dotplot_dop_neurons_subcluster.png'), height = 6, width = 9, units = 'in', res= 300)
+
+# #Identifying subcluster identity in full dataset
+# rna$subcluster = NA
+# rna$subcluster[colnames(rna)[colnames(rna) %in% colnames(dop_neurons)]] <- dop_neurons$seurat_clusters
+```
+
+#Add individuals
+```{r}
+indiv_folder = "/media/jenelle/4TB_disk/Dropbox/Analysis/Dreamlet_R_4.4.0/Midbrain/Ancestral_genome/Rotenone/"
+chimp_indiv <- read.csv(paste0(indiv_folder,'Chimp_all_assignments2.csv'), sep = '\t', header = FALSE, col.names = c('Barcode','Assignment','SorD','LogLikelihoodRatio'))
+human_indiv <- read.csv(paste0(indiv_folder,'Human_all_assignments2.csv'), sep = '\t', header = FALSE, col.names = c('Barcode','Assignment','SorD','LogLikelihoodRatio'))
+chimp_indiv$Indiv <- ifelse(chimp_indiv$SorD == 'S', chimp_indiv$Assignment, 'doublet')
+human_indiv$Indiv <- ifelse(human_indiv$SorD == 'S', human_indiv$Assignment, 'doublet')
+indiv <- rbind(chimp_indiv,human_indiv)
+#Reformat barcodes since Seurat has a different convention:
+indiv <- indiv %>%
+     mutate(cell_barcode = str_extract(Barcode, "^[A-Z0-9]+-1"),
+            library_part = str_remove(Barcode, "^[A-Z0-9]+-1-")) %>%
+     mutate(barcode_seurat = paste0(library_part, "_", cell_barcode))
+metadata_to_add <- indiv %>% dplyr::select(Indiv, SorD, barcode_seurat)
+rownames(metadata_to_add) <- metadata_to_add$barcode_seurat
+dop_neurons_withindiv <- AddMetaData(dop_neurons, metadata = metadata_to_add)
+```
+
+#Save as anndata
+```{r}
+library(SeuratDisk)
+#Convert from Seurat v5 back to v3 (because layers mess up conversion)
+rna_rotenone_dop= dop_neurons_withindiv
+rna_rotenone_dop[["RNA"]] <- as(object = rna_rotenone_dop[["RNA"]], Class = "Assay")
+SaveH5Seurat(rna_rotenone_dop, filename = paste0(version_folder,"rna_rotenone_dop_v5.h5Seurat"))
+Convert(paste0(version_folder, "rna_rotenone_dop_v5.h5Seurat"), dest = "h5ad")
+```
